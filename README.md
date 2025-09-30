@@ -2,7 +2,7 @@
 
 ![Build Status](https://github.com/Lazzzycatwastaken/NightForge/workflows/Build%20and%20Test/badge.svg)
 ![C++](https://img.shields.io/badge/C%2B%2B-17-blue?style=flat-square&logo=cplusplus&logoColor=white)
-![NightScript](https://img.shields.io/badge/NightScript-Language-8b00ef?style=flat-square&logo=https://raw.githubusercontent.com/Lazzzycatwastaken/NightForge/refs/heads/main/assets/nightscript-icon.svg&logoColor=white)
+![NightScript](https://img.shields.io/badge/NightScript-Language-8b00ef?style=flat-square&logo=lua&logoColor=white)
 ![CMake](https://img.shields.io/badge/CMake-Build-green?style=flat-square&logo=cmake&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)
 
