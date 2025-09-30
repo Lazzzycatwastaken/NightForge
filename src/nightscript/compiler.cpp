@@ -83,7 +83,7 @@ void Compiler::expression() {
 }
 
 void Compiler::expression_precedence(int min_precedence) {
-    // Parse primary expression (numbers, strings, parentheses, etc)
+    // Parse primary expression (numbers, strings, parentheses, identifiers, etc)
     if (match(TokenType::NUMBER)) {
         number();
     } else if (match(TokenType::STRING)) {
@@ -94,6 +94,8 @@ void Compiler::expression_precedence(int min_precedence) {
         grouping();
     } else if (match(TokenType::NOT)) {
         unary();
+    } else if (match(TokenType::IDENTIFIER)) {
+        identifier();
     } else {
         error("Expected expression");
         return;
@@ -174,6 +176,15 @@ void Compiler::unary() {
     emit_byte(static_cast<uint8_t>(OpCode::OP_NOT));
 }
 
+void Compiler::identifier() {
+    Token name = previous_token();
+    uint32_t name_id = strings_->intern(name.lexeme);
+    
+    // Add variable name to constants table and emit OP_GET_GLOBAL with index
+    size_t name_constant = chunk_->add_constant(Value::string_id(name_id));
+    emit_bytes(static_cast<uint8_t>(OpCode::OP_GET_GLOBAL), static_cast<uint8_t>(name_constant));
+}
+
 void Compiler::binary() {
     // TODO: implement proper precedence parsing
 }
@@ -184,10 +195,24 @@ void Compiler::statement() {
         return;
     }
     
-    // For now just print statements and expressions
+    // Check for print statement
     if (check(TokenType::IDENTIFIER) && current_token().lexeme == "print") {
         advance();
         print_statement();
+    // Check for assignment: identifier = expression
+    } else if (check(TokenType::IDENTIFIER)) {
+        // Look ahead to see if it's an assignment
+        size_t saved_current = current_;
+        advance(); // consume identifier
+        if (match(TokenType::ASSIGN)) {
+            // Rewind and parse assignment
+            current_ = saved_current;
+            assignment_statement();
+        } else {
+            // Rewind and parse as expression
+            current_ = saved_current;
+            expression_statement();
+        }
     } else {
         expression_statement();
     }
@@ -198,8 +223,26 @@ void Compiler::expression_statement() {
     emit_byte(static_cast<uint8_t>(OpCode::OP_POP)); // discard result
 }
 
+void Compiler::assignment_statement() {
+    // We already know this is an assignment (identifier = expression)
+    // The identifier should be the current token
+    Token name = current_token();
+    advance(); // consume identifier
+    uint32_t name_id = strings_->intern(name.lexeme);
+    
+    if (!match(TokenType::ASSIGN)) {
+        error("Expected '=' after variable name");
+        return;
+    }
+    
+    expression(); // Parse the value (leaves value on stack)
+    
+    // Add variable name to constants table and emit OP_SET_GLOBAL with index
+    size_t name_constant = chunk_->add_constant(Value::string_id(name_id));
+    emit_bytes(static_cast<uint8_t>(OpCode::OP_SET_GLOBAL), static_cast<uint8_t>(name_constant));
+}
+
 void Compiler::print_statement() {
-    // Handle multiple expressions: print "text" 42 + 3 "more"
     int expression_count = 0;
     
     do {
@@ -209,7 +252,7 @@ void Compiler::print_statement() {
         // Check if there's another expression coming
         bool has_more = (check(TokenType::STRING) || check(TokenType::NUMBER) || 
                         check(TokenType::BOOLEAN) || check(TokenType::NIL) || 
-                        check(TokenType::LEFT_PAREN));
+                        check(TokenType::LEFT_PAREN) || check(TokenType::IDENTIFIER));
         
         if (has_more) {
             emit_byte(static_cast<uint8_t>(OpCode::OP_PRINT_SPACE));
@@ -218,7 +261,7 @@ void Compiler::print_statement() {
         }
     } while (check(TokenType::STRING) || check(TokenType::NUMBER) || 
              check(TokenType::BOOLEAN) || check(TokenType::NIL) || 
-             check(TokenType::LEFT_PAREN));
+             check(TokenType::LEFT_PAREN) || check(TokenType::IDENTIFIER));
 }
 
 void Compiler::emit_byte(uint8_t byte) {

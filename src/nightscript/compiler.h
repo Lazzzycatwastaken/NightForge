@@ -31,11 +31,13 @@ private:
     void number();
     void string();
     void literal();
+    void identifier();
     void grouping();
     void unary();
     void binary();
     void statement();
     void expression_statement();
+    void assignment_statement();
     void print_statement();
     
     // Helper methods

@@ -213,6 +213,32 @@ VMResult VM::run(const Chunk& chunk) {
                 break;
             }
             
+            case OpCode::OP_GET_GLOBAL: {
+                Value variable_name = read_constant(chunk, ip);
+                if (variable_name.type != ValueType::STRING_ID) {
+                    runtime_error("Expected variable name");
+                    return VMResult::RUNTIME_ERROR;
+                }
+                
+                std::string var_name = strings_.get_string(variable_name.as.string_id);
+                Value value = get_global(var_name);
+                push(value);
+                break;
+            }
+            
+            case OpCode::OP_SET_GLOBAL: {
+                Value variable_name = read_constant(chunk, ip);
+                if (variable_name.type != ValueType::STRING_ID) {
+                    runtime_error("Expected variable name");
+                    return VMResult::RUNTIME_ERROR;
+                }
+                
+                std::string var_name = strings_.get_string(variable_name.as.string_id);
+                Value value = peek(); // Don't pop - assignment is an expression
+                set_global(var_name, value);
+                break;
+            }
+            
             case OpCode::OP_POP:
                 pop();
                 break;
@@ -252,7 +278,7 @@ bool VM::binary_op(OpCode op) {
             case OpCode::OP_MULTIPLY: result = a.as.integer * b.as.integer; break;
             case OpCode::OP_DIVIDE: 
                 if (b.as.integer == 0) {
-                    runtime_error("Division by zero");
+                    runtime_error("Don't divide by zero.");
                     return false;
                 }
                 result = a.as.integer / b.as.integer; 
@@ -276,7 +302,7 @@ bool VM::binary_op(OpCode op) {
             case OpCode::OP_MULTIPLY: result = da * db; break;
             case OpCode::OP_DIVIDE: 
                 if (db == 0.0) {
-                    runtime_error("Division by zero");
+                    runtime_error("Don't divide by zero.");
                     return false;
                 }
                 result = da / db; 
