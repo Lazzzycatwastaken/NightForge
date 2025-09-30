@@ -1,0 +1,17 @@
+# NightScript support
+*.ns linguist-language=NightScript
+*.ns linguist-detectable=true
+
+# Make sure CPP is properly detected
+*.cpp linguist-language=C++
+*.h linguist-language=C++
+*.hpp linguist-language=C++
+
+# Documentation
+*.md linguist-documentation=true
+
+# Explude these files
+build/* linguist-generated=true
+*.o linguist-generated=true
+*.a linguist-generated=true
+stb_image.h linguist-vendored=true

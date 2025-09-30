@@ -1,5 +1,6 @@
 #include "engine.h"
 #include <iostream>
+#include <fstream>
 #include <cstdio>
 #include <cstdlib>
 #include <termios.h>
@@ -22,6 +23,9 @@ Engine::Engine(const Config& config)
     : config_(config), running_(false), terminal_initialized_(false), 
       current_cols_(0), current_rows_(0) {
     g_engine_instance = this;
+    vm_ = std::make_unique<nightscript::VM>();
+    
+    setup_host_functions();
 }
 
 Engine::~Engine() {
@@ -37,6 +41,11 @@ int Engine::run() {
     
     if (config_.run_benchmarks) {
         std::cout << "Benchmarks not yet implemented\n";
+        return 0;
+    }
+    
+    if (!config_.script_file.empty()) {
+        execute_script_file(config_.script_file);
         return 0;
     }
     
@@ -201,6 +210,102 @@ void Engine::render() {
     renderer_->draw_dialog_box("Welcome to NightForge. Press Q to quit.");
     
     renderer_->render();
+}
+
+void Engine::execute_script_file(const std::string& filename) {
+    std::cout << "=== Executing Script: " << filename << " ===" << std::endl;
+    
+    // Read file
+    std::ifstream file(filename);
+    if (!file.is_open()) {
+        std::cerr << "Error: Could not open script file: " << filename << std::endl;
+        return;
+    }
+    
+    std::string source;
+    std::string line;
+    while (std::getline(file, line)) {
+        source += line + "\n";
+    }
+    file.close();
+    
+    if (source.empty()) {
+        std::cerr << "Error: Script file is empty: " << filename << std::endl;
+        return;
+    }
+    
+    std::cout << "Compiling script..." << std::endl;
+    
+    nightscript::Compiler compiler;
+    nightscript::Chunk chunk;
+    
+    if (compiler.compile(source, chunk, vm_->strings())) {
+        std::cout << "Compilation successful!" << std::endl;
+        std::cout << "Executing..." << std::endl;
+        
+        nightscript::VMResult result = vm_->execute(chunk);
+        
+        switch (result) {
+            case nightscript::VMResult::OK:
+                std::cout << "Execution completed successfully!" << std::endl;
+                break;
+            case nightscript::VMResult::COMPILE_ERROR:
+                std::cout << "Compilation error!" << std::endl;
+                break;
+            case nightscript::VMResult::RUNTIME_ERROR:
+                std::cout << "Runtime error!" << std::endl;
+                break;
+        }
+    } else {
+        std::cout << "Compilation failed!" << std::endl;
+    }
+    
+    std::cout << "=== Script Complete ===" << std::endl;
+}
+
+void Engine::setup_host_functions() {
+    using namespace nightscript;
+    
+    // show_text(string) - display text in dialogue panel
+    vm_->register_host_function("show_text", [this](const std::vector<Value>& args) -> Value {
+        if (args.size() != 1 || args[0].type != ValueType::STRING_ID) {
+            std::cerr << "show_text: expected string argument" << std::endl;
+            return Value::nil();
+        }
+        
+        std::string text = vm_->strings().get_string(args[0].as.string_id);
+        std::cout << "[SHOW_TEXT] " << text << std::endl;
+        // TODO: integrate with TUI renderer properly
+        
+        return Value::nil();
+    });
+    
+    // log(string) - debug output  
+    vm_->register_host_function("log", [this](const std::vector<Value>& args) -> Value {
+        if (args.size() != 1 || args[0].type != ValueType::STRING_ID) {
+            std::cerr << "log: expected string argument" << std::endl;
+            return Value::nil();
+        }
+        
+        std::string message = vm_->strings().get_string(args[0].as.string_id);
+        std::cout << "[LOG] " << message << std::endl;
+        
+        return Value::nil();
+    });
+    
+    // Simple test function
+    // vm_->register_host_function("test_add", [](const std::vector<Value>& args) -> Value {
+    //     if (args.size() != 2) {
+    //         std::cerr << "test_add: expected 2 arguments" << std::endl;
+    //         return Value::nil();
+    //     }
+        
+    //     if (args[0].type == ValueType::INT && args[1].type == ValueType::INT) {
+    //         return Value::integer(args[0].as.integer + args[1].as.integer);
+    //     }
+        
+    //     return Value::nil();
+    // });
 }
 
 } // namespace nightforge

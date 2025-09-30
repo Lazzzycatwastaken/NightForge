@@ -1,6 +1,8 @@
 #pragma once
 #include "config.h"
 #include "../rendering/tui_renderer.h"
+#include "../nightscript/vm.h"
+#include "../nightscript/compiler.h"
 #include <memory>
 
 namespace nightforge {
@@ -16,6 +18,7 @@ private:
     Config config_;
     bool running_;
     std::unique_ptr<TUIRenderer> renderer_;
+    std::unique_ptr<nightscript::VM> vm_;
     
     bool init_terminal();
     void cleanup_terminal();
@@ -24,6 +27,10 @@ private:
     void handle_input();
     void update();
     void render();
+    
+    // NightScript
+    void execute_script_file(const std::string& filename);
+    void setup_host_functions();
     
     // Terminal state
     bool terminal_initialized_;

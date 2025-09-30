@@ -1,4 +1,5 @@
 #pragma once
+#include <string>
 
 namespace nightforge {
 
@@ -7,6 +8,7 @@ struct Config {
     int min_height = 24;
     bool hot_reload = false;
     bool run_benchmarks = false;
+    std::string script_file = "";  // Script file to execute
     
     // Asset paths
     const char* assets_dir = "assets";

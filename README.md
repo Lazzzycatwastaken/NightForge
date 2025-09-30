@@ -1,9 +1,8 @@
 # NightForge
 
 ![Build Status](https://github.com/Lazzzycatwastaken/NightForge/workflows/Build%20and%20Test/badge.svg)
-![Quick Build](https://github.com/username/Lazzzycatwastaken/workflows/Quick%20Build/badge.svg)
 
-A terminal-based game engine written in C++.
+A high-performance terminal-based game engine written in C++ with NightScript language support.
 
 ## Building
 
@@ -18,6 +17,9 @@ make
 ```bash
 # Running the engine
 ./nightforge
+
+# Test the NightScript interpreter
+./nightforge ../assets/scripts/demo.ns
 
 # Converting images to ASCII
 ./webp_to_ascii image.webp clean yes 80
