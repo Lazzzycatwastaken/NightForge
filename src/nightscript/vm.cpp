@@ -169,6 +169,22 @@ VMResult VM::run(const Chunk& chunk) {
                 break;
             }
             
+            case OpCode::OP_PRINT_SPACE: {
+                Value value = pop();
+                switch (value.type) {
+                    case ValueType::NIL: std::cout << "nil"; break;
+                    case ValueType::BOOL: std::cout << (value.as.boolean ? "true" : "false"); break;
+                    case ValueType::INT: std::cout << value.as.integer; break;
+                    case ValueType::FLOAT: std::cout << value.as.floating; break;
+                    case ValueType::STRING_ID: 
+                        std::cout << strings_.get_string(value.as.string_id); 
+                        break;
+                    default: std::cout << "unknown"; break;
+                }
+                std::cout << " ";  // space instead of newline
+                break;
+            }
+            
             case OpCode::OP_CALL_HOST: {
                 Value function_name = read_constant(chunk, ip);
                 uint8_t arg_count = read_byte(ip);

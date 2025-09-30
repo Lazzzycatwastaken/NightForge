@@ -43,6 +43,7 @@ enum class OpCode : uint8_t {
     // Special
     OP_POP,          // pop top of stack
     OP_PRINT,        // debug print (for now)
+    OP_PRINT_SPACE,  // print with space separator
 };
 
 // Value types (POD union as specified)

@@ -27,6 +27,7 @@ private:
     
     // Compilation
     void expression();
+    void expression_precedence(int min_precedence);
     void number();
     void string();
     void literal();
@@ -36,6 +37,11 @@ private:
     void statement();
     void expression_statement();
     void print_statement();
+    
+    // Helper methods
+    int get_precedence(TokenType type);
+    bool is_binary_operator(TokenType type);
+    OpCode token_to_opcode(TokenType type);
     
     // Bytecode emission
     void emit_byte(uint8_t byte);

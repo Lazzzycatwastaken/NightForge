@@ -78,7 +78,12 @@ void Compiler::consume(TokenType type, const char* message) {
 }
 
 void Compiler::expression() {
-    // For now just handle simple literals and grouping
+    // Start with lowest precedence
+    expression_precedence(0);
+}
+
+void Compiler::expression_precedence(int min_precedence) {
+    // Parse primary expression (numbers, strings, parentheses, etc)
     if (match(TokenType::NUMBER)) {
         number();
     } else if (match(TokenType::STRING)) {
@@ -91,6 +96,31 @@ void Compiler::expression() {
         unary();
     } else {
         error("Expected expression");
+        return;
+    }
+    
+    // Handle binary operators with precedence
+    while (true) {
+        Token current = current_token();
+        if (!is_binary_operator(current.type)) {
+            break;
+        }
+        
+        int precedence = get_precedence(current.type);
+        if (precedence < min_precedence) {
+            break;
+        }
+        
+        // Consume the operator
+        advance();
+        TokenType operator_type = previous_token().type;
+        
+        // Parse the right side expression
+        expression_precedence(precedence + 1);
+        
+        //boom 
+        OpCode op = token_to_opcode(operator_type);
+        emit_byte(static_cast<uint8_t>(op));
     }
 }
 
@@ -169,8 +199,26 @@ void Compiler::expression_statement() {
 }
 
 void Compiler::print_statement() {
-    expression();
-    emit_byte(static_cast<uint8_t>(OpCode::OP_PRINT));
+    // Handle multiple expressions: print "text" 42 + 3 "more"
+    int expression_count = 0;
+    
+    do {
+        expression();
+        expression_count++;
+        
+        // Check if there's another expression coming
+        bool has_more = (check(TokenType::STRING) || check(TokenType::NUMBER) || 
+                        check(TokenType::BOOLEAN) || check(TokenType::NIL) || 
+                        check(TokenType::LEFT_PAREN));
+        
+        if (has_more) {
+            emit_byte(static_cast<uint8_t>(OpCode::OP_PRINT_SPACE));
+        } else {
+            emit_byte(static_cast<uint8_t>(OpCode::OP_PRINT)); // Last one gets newline
+        }
+    } while (check(TokenType::STRING) || check(TokenType::NUMBER) || 
+             check(TokenType::BOOLEAN) || check(TokenType::NIL) || 
+             check(TokenType::LEFT_PAREN));
 }
 
 void Compiler::emit_byte(uint8_t byte) {
@@ -215,6 +263,60 @@ void Compiler::error_at(const Token& token, const char* message) {
     }
     
     std::cerr << ": " << message << std::endl;
+}
+
+int Compiler::get_precedence(TokenType type) {
+    // Higher number = higher precedence (so correct order)
+    switch (type) {
+        case TokenType::MULTIPLY:
+        case TokenType::DIVIDE:
+            return 3;
+        case TokenType::PLUS:
+        case TokenType::MINUS:
+            return 2;
+        case TokenType::EQUAL:
+        case TokenType::NOT_EQUAL:
+        case TokenType::GREATER:
+        case TokenType::GREATER_EQUAL:
+        case TokenType::LESS:
+        case TokenType::LESS_EQUAL:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+bool Compiler::is_binary_operator(TokenType type) {
+    switch (type) {
+        case TokenType::PLUS:
+        case TokenType::MINUS:
+        case TokenType::MULTIPLY:
+        case TokenType::DIVIDE:
+        case TokenType::EQUAL:
+        case TokenType::NOT_EQUAL:
+        case TokenType::GREATER:
+        case TokenType::GREATER_EQUAL:
+        case TokenType::LESS:
+        case TokenType::LESS_EQUAL:
+            return true;
+        default:
+            return false;
+    }
+}
+
+OpCode Compiler::token_to_opcode(TokenType type) {
+    switch (type) {
+        case TokenType::PLUS: return OpCode::OP_ADD;
+        case TokenType::MINUS: return OpCode::OP_SUBTRACT;
+        case TokenType::MULTIPLY: return OpCode::OP_MULTIPLY;
+        case TokenType::DIVIDE: return OpCode::OP_DIVIDE;
+        case TokenType::EQUAL: return OpCode::OP_EQUAL;
+        case TokenType::GREATER: return OpCode::OP_GREATER;
+        case TokenType::LESS: return OpCode::OP_LESS;
+        default:
+            error("UNKNOWN binary operator");
+            return OpCode::OP_ADD; // fallback
+    }
 }
 
 } // namespace nightscript
