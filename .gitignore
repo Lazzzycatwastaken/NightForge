@@ -1,0 +1,11 @@
+build/
+*.o
+*.so
+*.a
+nightforge
+webp_to_ascii
+.vscode/
+.clangd/
+compile_commands.json
+saves/
+*.log

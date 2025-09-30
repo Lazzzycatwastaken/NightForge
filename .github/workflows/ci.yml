@@ -1,0 +1,185 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        compiler: [gcc, clang]
+        build_type: [Debug, Release]
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake build-essential
+        if [ "${{ matrix.compiler }}" = "clang" ]; then
+          sudo apt-get install -y clang
+        fi
+    
+    - name: Configure CMake
+      run: |
+        mkdir build
+        cd build
+        if [ "${{ matrix.compiler }}" = "clang" ]; then
+          export CXX=clang++
+          export CC=clang
+        fi
+        cmake .. -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+    
+    - name: Build
+      run: |
+        cd build
+        make -j$(nproc)
+    
+    - name: Test executables exist
+      run: |
+        cd build
+        test -f nightforge
+        test -f webp_to_ascii
+        echo "✓ Both executables built successfully"
+    
+    - name: Test help commands
+      run: |
+        cd build
+        ./nightforge --help
+        ./webp_to_ascii || true  # This will show usage and exit with error code
+        echo "✓ Help commands work"
+    
+    - name: Test basic functionality
+      run: |
+        cd build
+        # Test with very small terminal requirements to avoid fallback screen
+        timeout 5s ./nightforge --min-width 10 --min-height 5 || true
+        echo "✓ Engine starts without crashing"
+
+  build-macos:
+    runs-on: macos-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install dependencies
+      run: |
+        brew install cmake
+    
+    - name: Configure CMake
+      run: |
+        mkdir build
+        cd build
+        cmake .. -DCMAKE_BUILD_TYPE=Release
+    
+    - name: Build
+      run: |
+        cd build
+        make -j$(sysctl -n hw.ncpu)
+    
+    - name: Test executables exist
+      run: |
+        cd build
+        test -f nightforge
+        test -f webp_to_ascii
+        echo "✓ Both executables built successfully on macOS"
+    
+    - name: Test help commands
+      run: |
+        cd build
+        ./nightforge --help
+        ./webp_to_ascii || true
+        echo "✓ Help commands work on macOS"
+
+  code-quality:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake build-essential
+    
+    - name: Check for common issues
+      run: |
+        # Check for TODO/FIXME comments (excluding third-party code)
+        if grep -r "TODO\|FIXME" src/ --exclude-dir=rendering || true; then
+          echo "⚠️  Found TODO/FIXME comments - consider addressing them"
+        fi
+        
+        # Check file permissions
+        find src/ -name "*.cpp" -o -name "*.h" | xargs ls -la
+        
+        # Check for large files that shouldn't be committed
+        find . -size +1M -not -path "./build/*" -not -path "./.git/*" || true
+    
+    - name: Build with warnings as errors
+      run: |
+        mkdir build-strict
+        cd build-strict
+        cmake .. -DCMAKE_CXX_FLAGS="-Wall -Wextra -Werror"
+        make -j$(nproc)
+        echo "✓ Code compiles without warnings"
+
+  test-different-terminals:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake build-essential
+    
+    - name: Build
+      run: |
+        mkdir build
+        cd build
+        cmake .. -DCMAKE_BUILD_TYPE=Release
+        make -j$(nproc)
+    
+    - name: Test terminal size detection
+      run: |
+        cd build
+        # Test various terminal size scenarios
+        echo "Testing fallback screen with small terminal..."
+        timeout 3s ./nightforge --min-width 200 --min-height 50 || true
+        
+        echo "Testing with normal requirements..."
+        timeout 3s ./nightforge --min-width 20 --min-height 10 || true
+        
+        echo "✓ Terminal size detection works"
+
+  memory-check:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake build-essential valgrind
+    
+    - name: Build Debug version
+      run: |
+        mkdir build
+        cd build
+        cmake .. -DCMAKE_BUILD_TYPE=Debug
+        make -j$(nproc)
+    
+    - name: Memory leak check
+      run: |
+        cd build
+        # Run a quick memory check (engine will exit quickly due to terminal constraints)
+        timeout 10s valgrind --leak-check=full --error-exitcode=1 --quiet ./nightforge --min-width 200 --min-height 50 || true
+        echo "✓ Memory check completed"

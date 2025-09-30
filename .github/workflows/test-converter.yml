@@ -1,0 +1,51 @@
+name: Test ASCII Converter
+
+on:
+  push:
+    paths:
+      - 'tools/**'
+      - 'src/rendering/**'
+  pull_request:
+    paths:
+      - 'tools/**'
+      - 'src/rendering/**'
+
+jobs:
+  test-converter:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake build-essential imagemagick
+    
+    - name: Create test image
+      run: |
+        # Create a simple test image using ImageMagick
+        convert -size 64x32 xc:white -fill black -gravity center -pointsize 20 -annotate +0+0 "TEST" test.png
+    
+    - name: Build converter
+      run: |
+        mkdir build && cd build
+        cmake ..
+        make webp_to_ascii -j$(nproc)
+    
+    - name: Test ASCII conversion
+      run: |
+        cd build
+        ./webp_to_ascii ../test.png clean no 40
+        echo "✓ ASCII conversion successful"
+    
+    - name: Test different styles
+      run: |
+        cd build
+        echo "Testing clean style:"
+        ./webp_to_ascii ../test.png clean no 30
+        echo -e "\nTesting high_fidelity style:"
+        ./webp_to_ascii ../test.png high_fidelity no 30
+        echo -e "\nTesting block style:"
+        ./webp_to_ascii ../test.png block no 30
+        echo "✓ All styles work"
