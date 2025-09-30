@@ -1,7 +1,6 @@
 # NightForge
 
 ![Build Status](https://github.com/Lazzzycatwastaken/NightForge/workflows/Build%20and%20Test/badge.svg)
-![Quick Build](https://github.com/username/Lazzzycatwastaken/workflows/Quick%20Build/badge.svg)
 
 A terminal-based game engine written in C++.
 
