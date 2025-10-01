@@ -14,6 +14,7 @@ std::unordered_map<std::string, TokenType> Lexer::keywords_ = {
     {"elseif", TokenType::ELSEIF},
     {"else", TokenType::ELSE},
     {"while", TokenType::WHILE},
+    {"do", TokenType::DO},
     {"choice", TokenType::CHOICE}, // same
     {"set", TokenType::SET},
     {"call", TokenType::CALL}, // this too

@@ -36,6 +36,7 @@ enum class OpCode : uint8_t {
     // Control flow
     OP_JUMP,         // unconditional jump
     OP_JUMP_IF_FALSE, // conditional jump
+    OP_JUMP_BACK,    // jump backwards (for loops)
     OP_CALL,         // call host function
     OP_CALL_HOST,    // call host function with name
     OP_RETURN,       // return from function

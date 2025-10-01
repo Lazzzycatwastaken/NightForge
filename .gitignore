@@ -10,3 +10,12 @@ compile_commands.json
 saves/
 *.log
 vscode-nightscript/
+assets/scripts/test_basic.ns
+assets/scripts/test_bool_while.ns
+assets/scripts/test_comparison.ns
+assets/scripts/test_countdown.ns
+assets/scripts/test_functions_with_loops.ns
+assets/scripts/test_nested_while.ns
+assets/scripts/test_nil_while.ns
+assets/scripts/test_simple_while.ns
+assets/scripts/test_while.ns

@@ -22,6 +22,7 @@ enum class TokenType {
     ELSEIF,
     ELSE,
     WHILE,
+    DO,
     CHOICE,
     SET,
     CALL,

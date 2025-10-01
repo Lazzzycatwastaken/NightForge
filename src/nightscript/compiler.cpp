@@ -215,6 +215,9 @@ void Compiler::statement() {
     // Check for if statement
     } else if (check(TokenType::IF)) {
         if_statement();
+    // Check for while statement
+    } else if (check(TokenType::WHILE)) {
+        while_statement();
     } else if (check(TokenType::FUNCTION)) {
         function_declaration();
     // Check for assignment: identifier = expression
@@ -321,6 +324,34 @@ void Compiler::if_statement() {
     consume(TokenType::END, "Expected 'end' to close an if statement");
 
     patch_jump(jump_over_else);
+}
+
+void Compiler::while_statement() {
+    consume(TokenType::WHILE, "Expected 'while'");
+    
+    size_t loop_start = chunk_->code().size();
+    
+    expression();
+    
+    consume(TokenType::DO, "Expected 'do' after while condition");
+    
+    size_t exit_jump = emit_jump(static_cast<uint8_t>(OpCode::OP_JUMP_IF_FALSE));
+    
+    while (!check(TokenType::END) && !check(TokenType::EOF_TOKEN)) {
+        statement();
+    }
+    
+    consume(TokenType::END, "Expected 'end' to close while loop");
+    
+    size_t jump_back_offset = chunk_->code().size() - loop_start + 2;
+    if (jump_back_offset > 255) {
+        error("Loop body too large");
+        jump_back_offset = 255;
+    }
+    emit_byte(static_cast<uint8_t>(OpCode::OP_JUMP_BACK));
+    emit_byte(static_cast<uint8_t>(jump_back_offset));
+    
+    patch_jump(exit_jump);
 }
 
 void Compiler::function_declaration() {

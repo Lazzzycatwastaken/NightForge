@@ -149,6 +149,12 @@ VMResult VM::run(const Chunk& chunk) {
                 ip += offset;
                 break;
             }
+
+            case OpCode::OP_JUMP_BACK: {
+                uint8_t offset = read_byte(ip);
+                ip -= offset;
+                break;
+            }
             
             case OpCode::OP_EQUAL: {
                 Value b = pop();
@@ -166,6 +172,36 @@ VMResult VM::run(const Chunk& chunk) {
                     }
                 }
                 push(Value::boolean(equal));
+                break;
+            }
+
+            case OpCode::OP_GREATER: {
+                Value b = pop();
+                Value a = pop();
+                bool result = false;
+                if (a.type == b.type) {
+                    switch (a.type) {
+                        case ValueType::INT: result = a.as.integer > b.as.integer; break;
+                        case ValueType::FLOAT: result = a.as.floating > b.as.floating; break;
+                        default: result = false; break;
+                    }
+                }
+                push(Value::boolean(result));
+                break;
+            }
+
+            case OpCode::OP_LESS: {
+                Value b = pop();
+                Value a = pop();
+                bool result = false;
+                if (a.type == b.type) {
+                    switch (a.type) {
+                        case ValueType::INT: result = a.as.integer < b.as.integer; break;
+                        case ValueType::FLOAT: result = a.as.floating < b.as.floating; break;
+                        default: result = false; break;
+                    }
+                }
+                push(Value::boolean(result));
                 break;
             }
             

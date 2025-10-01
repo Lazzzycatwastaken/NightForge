@@ -40,6 +40,7 @@ private:
     void assignment_statement();
     void print_statement();
     void if_statement();
+    void while_statement();
     size_t emit_jump(uint8_t instruction);
     void patch_jump(size_t jump_position);
     void function_declaration();
