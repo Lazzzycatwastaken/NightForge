@@ -3,12 +3,33 @@
 #include <string>
 #include <algorithm>
 #include <vector>
-#include <thread>
 #include <chrono>
 #include <cstring>
 #include <fstream>
 #include "stb_image.h"
 #include <csignal>
+
+// Compatibility for older C++ standards
+#if __cplusplus >= 201103L
+#include <thread>
+#endif
+
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
+
+// Cross-platform sleep function
+void sleep_for_ms(int ms) {
+#if __cplusplus >= 201103L
+    std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+#elif defined(_WIN32)
+    Sleep(ms);
+#else
+    usleep(ms * 1000);
+#endif
+}
 
 static std::string to_lower(std::string s) {
     std::transform(s.begin(), s.end(), s.begin(), ::tolower);
@@ -187,7 +208,8 @@ int main(int argc, char** argv) {
             // Sleep until the scheduled time, or if we're already past it, try to catch up by skipping frames.
             now = std::chrono::steady_clock::now();
             if (next_frame_time > now) {
-                std::this_thread::sleep_for(next_frame_time - now);
+                auto sleep_duration = std::chrono::duration_cast<std::chrono::milliseconds>(next_frame_time - now);
+                sleep_for_ms(static_cast<int>(sleep_duration.count()));
             } else {
                 // We're behind schedule. Try to skip ahead frames until we're close to the next_frame_time (1.7 worldgen be like)
                 while (!g_stop && f + 1 < frames) {

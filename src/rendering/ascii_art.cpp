@@ -7,6 +7,16 @@
 #include <stdexcept>
 #include <cstring>
 
+// Compatibility for older C++ standards
+#if __cplusplus < 201703L
+namespace std {
+    template<class T>
+    constexpr const T& clamp(const T& v, const T& lo, const T& hi) {
+        return (v < lo) ? lo : (hi < v) ? hi : v;
+    }
+}
+#endif
+
 namespace ascii_art {
 
 Interpreter::Interpreter(const Config& config) : config_(config) {}
