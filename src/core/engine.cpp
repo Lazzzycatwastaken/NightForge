@@ -34,19 +34,19 @@ Engine::~Engine() {
 }
 
 int Engine::run() {
-    if (!init_terminal()) {
-        std::cerr << "Failed to initialize terminal" << std::endl;
-        return 1;
-    }
-    
     if (config_.run_benchmarks) {
         std::cout << "Benchmarks not yet implemented\n";
         return 0;
     }
-    
+
     if (!config_.script_file.empty()) {
         execute_script_file(config_.script_file);
         return 0;
+    }
+
+    if (!init_terminal()) {
+        std::cerr << "Failed to initialize terminal" << std::endl;
+        return 1;
     }
     
     running_ = true;
