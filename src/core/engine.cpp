@@ -7,6 +7,12 @@
 #include <algorithm>
 #include <cctype>
 
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
+
 namespace nightforge {
 
 Engine::Engine(const Config& config) 
@@ -237,6 +243,76 @@ void Engine::setup_host_functions() {
         
         std::string message = vm_->strings().get_string(args[0].as.string_id);
         std::cout << "[LOG] " << message << std::endl;
+        
+        return Value::nil();
+    });
+    
+    vm_->register_host_function("wait", [this](const std::vector<Value>& args) -> Value {
+        if (args.size() != 1) {
+            std::cerr << "wait: expected 1 argument (seconds)" << std::endl;
+            return Value::nil();
+        }
+        
+        double seconds = 0.0;
+        if (args[0].type == ValueType::INT) {
+            seconds = static_cast<double>(args[0].as.integer);
+        } else if (args[0].type == ValueType::FLOAT) {
+            seconds = args[0].as.floating;
+        } else {
+            std::cerr << "wait: expected number argument" << std::endl;
+            return Value::nil();
+        }
+        
+        if (seconds < 0) {
+            std::cerr << "wait: seconds can't be negative" << std::endl;
+            return Value::nil();
+        }
+        
+        int milliseconds = static_cast<int>(seconds * 1000);
+        
+        if (terminal_) {
+            terminal_->sleep_ms(milliseconds);
+        } else {
+            #ifdef _WIN32
+            Sleep(milliseconds);
+            #else
+            usleep(milliseconds * 1000);
+            #endif
+        }
+        
+        return Value::nil();
+    });
+    
+    vm_->register_host_function("wait_ms", [this](const std::vector<Value>& args) -> Value {
+        if (args.size() != 1) {
+            std::cerr << "wait_ms: expected 1 argument (milliseconds)" << std::endl;
+            return Value::nil();
+        }
+        
+        int milliseconds = 0;
+        if (args[0].type == ValueType::INT) {
+            milliseconds = static_cast<int>(args[0].as.integer);
+        } else if (args[0].type == ValueType::FLOAT) {
+            milliseconds = static_cast<int>(args[0].as.floating);
+        } else {
+            std::cerr << "wait_ms: expected number argument" << std::endl;
+            return Value::nil();
+        }
+        
+        if (milliseconds < 0) {
+            std::cerr << "wait_ms: milliseconds must be non-negative" << std::endl;
+            return Value::nil();
+        }
+        
+        if (terminal_) {
+            terminal_->sleep_ms(milliseconds);
+        } else {
+            #ifdef _WIN32
+            Sleep(milliseconds);
+            #else
+            usleep(milliseconds * 1000);
+            #endif
+        }
         
         return Value::nil();
     });
