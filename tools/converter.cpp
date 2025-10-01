@@ -9,11 +9,6 @@
 #include "stb_image.h"
 #include <csignal>
 
-// Compatibility for older C++ standards
-#if __cplusplus >= 201103L
-#include <thread>
-#endif
-
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -22,9 +17,7 @@
 
 // Cross-platform sleep function
 void sleep_for_ms(int ms) {
-#if __cplusplus >= 201103L
-    std::this_thread::sleep_for(std::chrono::milliseconds(ms));
-#elif defined(_WIN32)
+#ifdef _WIN32
     Sleep(ms);
 #else
     usleep(ms * 1000);
