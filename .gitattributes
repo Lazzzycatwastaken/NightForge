@@ -1,9 +1,7 @@
 # NightScript support
 *.ns linguist-language=NightScript
-*.ns linguist-detectable=true
-assets/scripts/* linguist-language=NightScript
 
-# Make sure CPP is properly detected
+# Make sure C++ is properly detected
 *.cpp linguist-language=C++
 *.h linguist-language=C++
 *.hpp linguist-language=C++
@@ -11,7 +9,7 @@ assets/scripts/* linguist-language=NightScript
 # Documentation
 *.md linguist-documentation=true
 
-# Explude these files
+# Exclude these files
 build/* linguist-generated=true
 *.o linguist-generated=true
 *.a linguist-generated=true

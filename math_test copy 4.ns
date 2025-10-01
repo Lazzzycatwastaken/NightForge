@@ -1,7 +1,0 @@
-print "=== Math Test ==="
-print 10 + 5
-print 20 - 7
-print 6 * 9
-print 100 / 4
-print 2 + 3 * 4
-print (2 + 3) * 4

@@ -1,7 +1,0 @@
-x = 67
-
-if x is 1 then
-    print "1"
-else
-    print x
-end

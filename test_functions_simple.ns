@@ -1,5 +1,0 @@
-function PrintSomething
-    print "Something"
-end
-
-PrintSomething
