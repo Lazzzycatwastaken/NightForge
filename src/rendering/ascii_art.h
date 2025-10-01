@@ -3,7 +3,6 @@
 #include <vector>
 #include <cstdint>
 #include <unordered_map>
-#include <string_view>
 
 extern "C" {
     typedef unsigned char stbi_uc;

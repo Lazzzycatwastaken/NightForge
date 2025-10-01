@@ -5,6 +5,11 @@
 #include <conio.h>
 #include <iostream>
 
+// Define missing constants for older Windows SDK/MinGW
+#ifndef ENABLE_VIRTUAL_TERMINAL_PROCESSING
+#define ENABLE_VIRTUAL_TERMINAL_PROCESSING 0x0004
+#endif
+
 namespace nightforge {
 
 TerminalWin::TerminalWin() : initialized_(false), stdin_handle_(INVALID_HANDLE_VALUE), 
@@ -39,9 +44,11 @@ bool TerminalWin::init() {
         return false;
     }
     
+    // Set output mode: try to enable virtual terminal processing for ANSI sequences
+    // This may fail on older Windows versions, which is fine - we'll fall back to Win32 APIs
     DWORD output_mode = original_stdout_mode_;
     output_mode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
-    SetConsoleMode(stdout_handle_, output_mode);
+    SetConsoleMode(stdout_handle_, output_mode); // Don't fail if VT processing unavailable
     
     clear_screen();
     hide_cursor();
