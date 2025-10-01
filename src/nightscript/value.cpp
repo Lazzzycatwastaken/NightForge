@@ -38,6 +38,28 @@ Value Chunk::get_constant(size_t index) const {
     return constants_[index];
 }
 
+size_t Chunk::add_function(const Chunk& function_chunk, const std::string& param_name, const std::string& function_name) {
+    functions_.push_back(function_chunk);
+    function_params_.push_back(param_name);
+    function_names_.push_back(function_name);
+    return functions_.size() - 1;
+}
+
+const Chunk& Chunk::get_function(size_t index) const {
+    return functions_[index];
+}
+
+const std::string& Chunk::get_function_param_name(size_t index) const {
+    return function_params_[index];
+}
+
+ssize_t Chunk::get_function_index(const std::string& name) const {
+    for (size_t i = 0; i < function_names_.size(); ++i) {
+        if (function_names_[i] == name) return static_cast<ssize_t>(i);
+    }
+    return -1;
+}
+
 // String table implementation
 uint32_t StringTable::intern(const std::string& str) {
     auto it = string_to_id_.find(str);

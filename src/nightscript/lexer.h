@@ -29,6 +29,7 @@ enum class TokenType {
     END,
     ON_ENTER,
     THEN,
+    FUNCTION,
     
     // Operators
     ASSIGN,      // =

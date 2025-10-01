@@ -184,7 +184,15 @@ void Compiler::unary() {
 void Compiler::identifier() {
     Token name = previous_token();
     uint32_t name_id = strings_->intern(name.lexeme);
-    
+
+    // If this identifier has a '(' treat as function call
+    if (check(TokenType::LEFT_PAREN)) {
+        // rewind so call_expression can see previous_token as name
+        // previous_token is already the identifier
+        call_expression();
+        return;
+    }
+
     // Add variable name to constants table and emit OP_GET_GLOBAL with index
     size_t name_constant = chunk_->add_constant(Value::string_id(name_id));
     emit_bytes(static_cast<uint8_t>(OpCode::OP_GET_GLOBAL), static_cast<uint8_t>(name_constant));
@@ -207,15 +215,33 @@ void Compiler::statement() {
     // Check for if statement
     } else if (check(TokenType::IF)) {
         if_statement();
+    } else if (check(TokenType::FUNCTION)) {
+        function_declaration();
     // Check for assignment: identifier = expression
     } else if (check(TokenType::IDENTIFIER)) {
-        // Look ahead to see if it's an assignment
+        // Look ahead to see if it's an assignment or a bare call
         size_t saved_current = current_;
-        advance(); // consume identifier
-        if (match(TokenType::ASSIGN)) {
-            // Rewind and parse assignment
+        Token next = (current_ + 1 < tokens_.size()) ? tokens_[current_ + 1] : Token(TokenType::EOF_TOKEN, "", 0, 0);
+
+        if (next.type == TokenType::ASSIGN) {
+            // assignment
+            advance(); // consume identifier
             current_ = saved_current;
             assignment_statement();
+        } else if (next.type == TokenType::LEFT_PAREN) {
+            // function call with parentheses
+            current_ = saved_current;
+            expression_statement();
+        } else if (next.type == TokenType::NEWLINE || next.type == TokenType::EOF_TOKEN) {
+            // bare identifier as zero-arg call
+            Token name = current_token();
+            advance(); // consume identifier
+            uint32_t name_id = strings_->intern(name.lexeme);
+            size_t name_const = chunk_->add_constant(Value::string_id(name_id));
+            emit_byte(static_cast<uint8_t>(OpCode::OP_CALL_HOST));
+            emit_byte(static_cast<uint8_t>(name_const));
+            emit_byte(static_cast<uint8_t>(0)); // no arguments
+            emit_byte(static_cast<uint8_t>(OpCode::OP_POP)); // lock OFF
         } else {
             // Rewind and parse as expression
             current_ = saved_current;
@@ -295,6 +321,80 @@ void Compiler::if_statement() {
     consume(TokenType::END, "Expected 'end' to close an if statement");
 
     patch_jump(jump_over_else);
+}
+
+void Compiler::function_declaration() {
+    consume(TokenType::FUNCTION, "Expected 'function'");
+
+    // function name should be the identifier
+    if (!check(TokenType::IDENTIFIER)) {
+        error("Expected function name");
+        return;
+    }
+    Token name = current_token();
+    advance();
+    std::string func_name = name.lexeme;
+
+    // Optional parameter list: (parameter)
+    std::string param_name = "";
+    if (match(TokenType::LEFT_PAREN)) {
+        if (check(TokenType::IDENTIFIER)) {
+            Token p = current_token(); advance();
+            param_name = p.lexeme;
+        }
+        consume(TokenType::RIGHT_PAREN, "No ')' after a parameter list");
+    }
+
+    // Compile function body into a new Chunk
+    Chunk func_chunk;
+    StringTable local_strings = *strings_;
+
+    // Save current chunk and switch to function chunk
+    Chunk* saved_chunk = chunk_;
+    chunk_ = &func_chunk;
+
+    // compile body until END
+    while (!check(TokenType::END) && !check(TokenType::EOF_TOKEN)) {
+        statement();
+    }
+
+    // consume the END that closes the function
+    consume(TokenType::END, "Expected 'end' to close function");
+
+    // ensure a return at end of function body
+    emit_byte(static_cast<uint8_t>(OpCode::OP_RETURN));
+
+    // restore
+    chunk_ = saved_chunk;
+
+    // register function in parent chunk
+    size_t func_index = chunk_->add_function(func_chunk, param_name, func_name);
+}
+
+void Compiler::call_expression() {
+    // We're at identifier that represents a call
+    Token name = previous_token();
+    std::string func_name = name.lexeme;
+
+    // Parse optional argument list
+    int arg_count = 0;
+    if (match(TokenType::LEFT_PAREN)) {
+        if (!check(TokenType::RIGHT_PAREN)) {
+            expression();
+            arg_count++;
+            while (match(TokenType::COMMA)) {
+                expression();
+                arg_count++;
+            }
+        }
+        consume(TokenType::RIGHT_PAREN, "Expected ')' after arguments");
+    }
+
+    uint32_t name_id = strings_->intern(func_name);
+    size_t name_const = chunk_->add_constant(Value::string_id(name_id));
+    emit_byte(static_cast<uint8_t>(OpCode::OP_CALL_HOST));
+    emit_byte(static_cast<uint8_t>(name_const));
+    emit_byte(static_cast<uint8_t>(arg_count));
 }
 
 void Compiler::print_statement() {

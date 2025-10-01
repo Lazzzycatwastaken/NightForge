@@ -212,20 +212,47 @@ VMResult VM::run(const Chunk& chunk) {
                 
                 std::string func_name = strings_.get_string(function_name.as.string_id);
                 auto it = host_functions_.find(func_name);
-                if (it == host_functions_.end()) {
-                    runtime_error("Unknown function: %s", func_name.c_str());
-                    return VMResult::RUNTIME_ERROR;
-                }
-                
+
                 // Collect arguments from stack
                 std::vector<Value> args;
                 for (int i = 0; i < arg_count; ++i) {
                     args.insert(args.begin(), pop()); // reverse order
                 }
-                
-                // Call host function
-                Value result = it->second(args);
-                push(result);
+
+                if (it != host_functions_.end()) {
+                    // Call host function
+                    Value result = it->second(args);
+                    push(result);
+                    break;
+                }
+
+                // If not a host function, check for user-defined function in the chunk
+                // The current implementation stores user functions in the Chunk object
+                ssize_t func_index = chunk.get_function_index(func_name);
+                if (func_index >= 0) {
+                    const Chunk& fchunk = chunk.get_function(static_cast<size_t>(func_index));
+
+                    // If function expects a parameter, set it as a global named by param
+                    if (!chunk.get_function_param_name(static_cast<size_t>(func_index)).empty()) {
+                        const std::string& param = chunk.get_function_param_name(static_cast<size_t>(func_index));
+                        if (args.size() > 0) {
+                            set_global(param, args[0]);
+                        } else {
+                            set_global(param, Value::nil());
+                        }
+                    }
+
+                    // Execute function chunk
+                    VMResult r = execute(fchunk);
+                    if (r != VMResult::OK) return r;
+
+                    // No explicit return values yet; push nil
+                    push(Value::nil());
+                    break;
+                }
+
+                runtime_error("Unknown function: %s", func_name.c_str());
+                return VMResult::RUNTIME_ERROR;
                 break;
             }
             

@@ -116,6 +116,11 @@ public:
     const std::vector<uint8_t>& code() const { return code_; }
     const std::vector<Value>& constants() const { return constants_; }
     const std::vector<int>& lines() const { return lines_; }
+    // User-defined functions stored with the chunk
+    size_t add_function(const Chunk& function_chunk, const std::string& param_name, const std::string& function_name);
+    const Chunk& get_function(size_t index) const;
+    const std::string& get_function_param_name(size_t index) const;
+    ssize_t get_function_index(const std::string& name) const;
     size_t code_size() const { return code_.size(); }
     void patch_byte(size_t index, uint8_t byte);
     
@@ -123,6 +128,10 @@ private:
     std::vector<uint8_t> code_;      // bytecode instructions
     std::vector<Value> constants_;   // constant pool
     std::vector<int> lines_;         // line numbers for debugging
+    // user functions
+    std::vector<Chunk> functions_;
+    std::vector<std::string> function_params_;
+    std::vector<std::string> function_names_;
 };
 
 // String intern table (for performance)

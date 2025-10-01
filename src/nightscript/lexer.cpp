@@ -21,6 +21,7 @@ std::unordered_map<std::string, TokenType> Lexer::keywords_ = {
     {"end", TokenType::END},
     {"on_enter", TokenType::ON_ENTER}, // this too
     {"then", TokenType::THEN},
+    {"function", TokenType::FUNCTION},
     {"and", TokenType::AND},
     {"or", TokenType::OR},
     {"not", TokenType::NOT},
