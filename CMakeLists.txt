@@ -20,6 +20,15 @@ file(GLOB_RECURSE SOURCES
 # Remove the converter and tools from main build
 list(FILTER SOURCES EXCLUDE REGEX "tools/.*")
 
+# Platform-specific terminal implementation
+if(WIN32)
+    # Remove POSIX terminal implementation on Windows
+    list(FILTER SOURCES EXCLUDE REGEX ".*terminal_posix\\.(cpp|h)")
+else()
+    # Remove Windows terminal implementation on non-Windows
+    list(FILTER SOURCES EXCLUDE REGEX ".*terminal_win\\.(cpp|h)")
+endif()
+
 # Create main executable
 add_executable(nightforge ${SOURCES})
 

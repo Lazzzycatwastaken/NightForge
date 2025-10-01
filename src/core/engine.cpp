@@ -3,34 +3,22 @@
 #include <fstream>
 #include <cstdio>
 #include <cstdlib>
-#include <termios.h>
-#include <unistd.h>
-#include <sys/ioctl.h>
-#include <csignal>
 #include <cstring>
+#include <algorithm>
+#include <cctype>
 
 namespace nightforge {
 
-static Engine* g_engine_instance = nullptr;
-
-static void signal_handler(int sig) {
-    if (g_engine_instance && sig == SIGWINCH) {
-        // Terminal resize signal
-    }
-}
-
 Engine::Engine(const Config& config) 
-    : config_(config), running_(false), terminal_initialized_(false), 
-      current_cols_(0), current_rows_(0) {
-    g_engine_instance = this;
+    : config_(config), running_(false), current_size_{0, 0} {
     vm_ = std::make_unique<nightscript::VM>();
+    terminal_ = std::unique_ptr<Terminal>(create_terminal());
     
     setup_host_functions();
 }
 
 Engine::~Engine() {
     cleanup_terminal();
-    g_engine_instance = nullptr;
 }
 
 int Engine::run() {
@@ -52,25 +40,23 @@ int Engine::run() {
     running_ = true;
     
     while (running_) {
-        int cols = 0, rows = 0;
-        if (!check_terminal_size(cols, rows)) {
+        TerminalSize size;
+        if (!check_terminal_size(size)) {
             // If check_terminal_size failed get current size anyway for display
-            struct winsize ws;
-            if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0) {
-                cols = ws.ws_col;
-                rows = ws.ws_row;
+            if (!terminal_->get_size(size)) {
+                size.cols = 80; // fallback
+                size.rows = 24;
             }
-            show_terminal_too_small_screen(cols, rows);
+            show_terminal_too_small_screen(size);
             handle_input(); // Handle Q/R input
             continue;
         }
         
-        current_cols_ = cols;
-        current_rows_ = rows;
+        current_size_ = size;
         
         // Initialize or resize renderer if needed
-        if (!renderer_ || renderer_->grid().width() != cols || renderer_->grid().height() != rows) {
-            renderer_ = std::make_unique<TUIRenderer>(cols, rows);
+        if (!renderer_ || renderer_->grid().width() != size.cols || renderer_->grid().height() != size.rows) {
+            renderer_ = std::make_unique<TUIRenderer>(size.cols, size.rows);
         }
         
         handle_input();
@@ -78,7 +64,7 @@ int Engine::run() {
         render();
         
         // braindead fps limiter
-        usleep(16666);
+        terminal_->sleep_ms(16);
     }
     
     cleanup_terminal();
@@ -86,60 +72,22 @@ int Engine::run() {
 }
 
 bool Engine::init_terminal() {
-    signal(SIGWINCH, signal_handler);
-    
-    // Set terminal to raw mode
-    struct termios term;
-    if (tcgetattr(STDIN_FILENO, &term) != 0) {
-        return false;
-    }
-    
-    // Save original terminal settings
-    
-    // Enable raw mode
-    term.c_lflag &= ~(ICANON | ECHO);
-    term.c_cc[VMIN] = 0;
-    term.c_cc[VTIME] = 0;
-    
-    if (tcsetattr(STDIN_FILENO, TCSANOW, &term) != 0) {
-        return false;
-    }
-    
-    printf("\033[2J\033[?25l");
-    fflush(stdout);
-    
-    terminal_initialized_ = true;
-    return true;
+    return terminal_->init();
 }
 
 void Engine::cleanup_terminal() {
-    if (terminal_initialized_) {
-        printf("\033[?25h\033[2J\033[H");
-        fflush(stdout);
-        struct termios term;
-        if (tcgetattr(STDIN_FILENO, &term) == 0) {
-            term.c_lflag |= (ICANON | ECHO);
-            tcsetattr(STDIN_FILENO, TCSANOW, &term);
-        }
-        
-        terminal_initialized_ = false;
+    if (terminal_) {
+        terminal_->cleanup();
     }
 }
 
-bool Engine::check_terminal_size(int& cols, int& rows) {
-    struct winsize ws;
-    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) != 0) {
-        return false;
-    }
-    
-    cols = ws.ws_col;
-    rows = ws.ws_row;
-    
-    return cols >= config_.min_width && rows >= config_.min_height;
+bool Engine::check_terminal_size(TerminalSize& size) {
+    return terminal_->check_size(config_.min_width, config_.min_height, size);
 }
 
-void Engine::show_terminal_too_small_screen(int current_cols, int current_rows) {
-    printf("\033[2J\033[H");
+void Engine::show_terminal_too_small_screen(const TerminalSize& current) {
+    terminal_->clear_screen();
+    terminal_->home_cursor();
     
     const char* header = "Terminal size too small:";
     char width_line[64];
@@ -147,7 +95,7 @@ void Engine::show_terminal_too_small_screen(int current_cols, int current_rows) 
     char needed_width[64];
     const char* instruction = "Press R to retry, Q to quit";
     
-    snprintf(width_line, sizeof(width_line), "Width = %d Height = %d", current_cols, current_rows);
+    snprintf(width_line, sizeof(width_line), "Width = %d Height = %d", current.cols, current.rows);
     snprintf(needed_width, sizeof(needed_width), "Width = %d Height = %d", config_.min_width, config_.min_height);
     
     size_t max_len = 0;
@@ -157,11 +105,11 @@ void Engine::show_terminal_too_small_screen(int current_cols, int current_rows) 
     max_len = std::max(max_len, strlen(needed_width));
     max_len = std::max(max_len, strlen(instruction));
     
-    int start_row = std::max(1, current_rows / 2 - 4);
+    int start_row = std::max(1, current.rows / 2 - 4);
     
     auto print_centered = [&](int row, const char* text) {
         int text_len = strlen(text);
-        int start_col = std::max(1, (current_cols - text_len) / 2);
+        int start_col = std::max(1, (current.cols - text_len) / 2);
         printf("\033[%d;%dH%s", row, start_col, text);
     };
     
@@ -176,7 +124,7 @@ void Engine::show_terminal_too_small_screen(int current_cols, int current_rows) 
 
 void Engine::handle_input() {
     char c;
-    if (read(STDIN_FILENO, &c, 1) > 0) {
+    if (terminal_->read_input(c)) {
         c = tolower(c);
         if (c == 'q') {
             running_ = false;

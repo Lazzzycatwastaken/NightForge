@@ -1,5 +1,6 @@
 #pragma once
 #include "config.h"
+#include "terminal.h"
 #include "../rendering/tui_renderer.h"
 #include "../nightscript/vm.h"
 #include "../nightscript/compiler.h"
@@ -19,11 +20,12 @@ private:
     bool running_;
     std::unique_ptr<TUIRenderer> renderer_;
     std::unique_ptr<nightscript::VM> vm_;
+    std::unique_ptr<Terminal> terminal_;
     
     bool init_terminal();
     void cleanup_terminal();
-    bool check_terminal_size(int& cols, int& rows);
-    void show_terminal_too_small_screen(int current_cols, int current_rows);
+    bool check_terminal_size(TerminalSize& size);
+    void show_terminal_too_small_screen(const TerminalSize& current);
     void handle_input();
     void update();
     void render();
@@ -33,9 +35,7 @@ private:
     void setup_host_functions();
     
     // Terminal state
-    bool terminal_initialized_;
-    int current_cols_;
-    int current_rows_;
+    TerminalSize current_size_;
 };
 
 } // namespace nightforge
