@@ -20,6 +20,12 @@ void Chunk::write_constant(const Value& value, int line) {
     }
 }
 
+void Chunk::patch_byte(size_t index, uint8_t byte) {
+    if (index < code_.size()) {
+        code_[index] = byte;
+    }
+}
+
 size_t Chunk::add_constant(const Value& value) {
     constants_.push_back(value);
     return constants_.size() - 1;

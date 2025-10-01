@@ -9,3 +9,4 @@ webp_to_ascii
 compile_commands.json
 saves/
 *.log
+vscode-nightscript/

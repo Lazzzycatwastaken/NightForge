@@ -116,6 +116,8 @@ public:
     const std::vector<uint8_t>& code() const { return code_; }
     const std::vector<Value>& constants() const { return constants_; }
     const std::vector<int>& lines() const { return lines_; }
+    size_t code_size() const { return code_.size(); }
+    void patch_byte(size_t index, uint8_t byte);
     
 private:
     std::vector<uint8_t> code_;      // bytecode instructions

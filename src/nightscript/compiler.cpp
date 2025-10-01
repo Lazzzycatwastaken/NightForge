@@ -11,6 +11,11 @@ Compiler::Compiler() : current_(0), chunk_(nullptr), strings_(nullptr), had_erro
 bool Compiler::compile(const std::string& source, Chunk& chunk, StringTable& strings) {
     Lexer lexer(source);
     tokens_ = lexer.tokenize();
+
+    // this is only for debugging
+    // for (const auto& t : tokens_) {
+    //     std::cerr << "[tok] line=" << t.line << " type=" << static_cast<int>(t.type) << " lex='" << t.lexeme << "'\n";
+    // }
     
     current_ = 0;
     chunk_ = &chunk;
@@ -199,6 +204,9 @@ void Compiler::statement() {
     if (check(TokenType::IDENTIFIER) && current_token().lexeme == "print") {
         advance();
         print_statement();
+    // Check for if statement
+    } else if (check(TokenType::IF)) {
+        if_statement();
     // Check for assignment: identifier = expression
     } else if (check(TokenType::IDENTIFIER)) {
         // Look ahead to see if it's an assignment
@@ -240,6 +248,53 @@ void Compiler::assignment_statement() {
     // Add variable name to constants table and emit OP_SET_GLOBAL with index
     size_t name_constant = chunk_->add_constant(Value::string_id(name_id));
     emit_bytes(static_cast<uint8_t>(OpCode::OP_SET_GLOBAL), static_cast<uint8_t>(name_constant));
+}
+
+size_t Compiler::emit_jump(uint8_t instruction) {
+    emit_byte(instruction);
+    // placeholder for jump offset
+    size_t pos = chunk_->code().size();
+    emit_byte(0);
+    return pos;
+}
+
+void Compiler::patch_jump(size_t jump_position) {
+    size_t offset = chunk_->code().size() - (jump_position + 1);
+    if (offset > 255) {
+        error("Jump too large");
+        offset = 255;
+    }
+    chunk_->patch_byte(jump_position, static_cast<uint8_t>(offset));
+}
+
+void Compiler::if_statement() {
+    consume(TokenType::IF, "Expected 'if'");
+
+    expression();
+
+    consume(TokenType::THEN, "Expected 'then' after a condition");
+
+    size_t jump_to_else = emit_jump(static_cast<uint8_t>(OpCode::OP_JUMP_IF_FALSE));
+
+    // compile then branch statements until ELSE or END
+    while (!check(TokenType::ELSE) && !check(TokenType::END) && !check(TokenType::EOF_TOKEN)) {
+        statement();
+    }
+
+    size_t jump_over_else = emit_jump(static_cast<uint8_t>(OpCode::OP_JUMP));
+
+    patch_jump(jump_to_else);
+
+    if (match(TokenType::ELSE)) {
+        // compile else branch
+        while (!check(TokenType::END) && !check(TokenType::EOF_TOKEN)) {
+            statement();
+        }
+    }
+
+    consume(TokenType::END, "Expected 'end' to close an if statement");
+
+    patch_jump(jump_over_else);
 }
 
 void Compiler::print_statement() {

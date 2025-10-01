@@ -7,26 +7,27 @@ namespace nightscript {
 
 // Keywords map (lua but simpler cause WE'RE braindead)
 std::unordered_map<std::string, TokenType> Lexer::keywords_ = {
-    {"scene", TokenType::SCENE},
+    {"scene", TokenType::SCENE}, //these are in-engine only
     {"character", TokenType::CHARACTER},
     {"dialogue", TokenType::DIALOGUE},
     {"if", TokenType::IF},
     {"elseif", TokenType::ELSEIF},
     {"else", TokenType::ELSE},
     {"while", TokenType::WHILE},
-    {"choice", TokenType::CHOICE},
+    {"choice", TokenType::CHOICE}, // same
     {"set", TokenType::SET},
-    {"call", TokenType::CALL},
+    {"call", TokenType::CALL}, // this too
     {"return", TokenType::RETURN},
     {"end", TokenType::END},
-    {"on_enter", TokenType::ON_ENTER},
+    {"on_enter", TokenType::ON_ENTER}, // this too
     {"then", TokenType::THEN},
     {"and", TokenType::AND},
     {"or", TokenType::OR},
     {"not", TokenType::NOT},
     {"true", TokenType::BOOLEAN},
     {"false", TokenType::BOOLEAN},
-    {"nil", TokenType::NIL}
+    {"nil", TokenType::NIL},
+    {"is", TokenType::EQUAL} //Sure why not lol
 };
 
 Lexer::Lexer(const std::string& source) 

@@ -133,6 +133,22 @@ VMResult VM::run(const Chunk& chunk) {
                 push(Value::boolean(is_falsy));
                 break;
             }
+
+            case OpCode::OP_JUMP_IF_FALSE: {
+                Value cond = pop();
+                bool is_false = (cond.type == ValueType::NIL) || (cond.type == ValueType::BOOL && !cond.as.boolean);
+                uint8_t offset = read_byte(ip);
+                if (is_false) {
+                    ip += offset;
+                }
+                break;
+            }
+
+            case OpCode::OP_JUMP: {
+                uint8_t offset = read_byte(ip);
+                ip += offset;
+                break;
+            }
             
             case OpCode::OP_EQUAL: {
                 Value b = pop();
