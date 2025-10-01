@@ -368,7 +368,7 @@ void Compiler::function_declaration() {
     chunk_ = saved_chunk;
 
     // register function in parent chunk
-    size_t func_index = chunk_->add_function(func_chunk, param_name, func_name);
+    chunk_->add_function(func_chunk, param_name, func_name);
 }
 
 void Compiler::call_expression() {
