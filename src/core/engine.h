@@ -36,6 +36,8 @@ private:
     
     // Terminal state
     TerminalSize current_size_;
+    bool showing_small_screen_ = false;
+    TerminalSize last_small_size_{0,0};
 };
 
 } // namespace nightforge

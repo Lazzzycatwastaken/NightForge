@@ -47,28 +47,45 @@ int Engine::run() {
     
     while (running_) {
         TerminalSize size;
-        if (!check_terminal_size(size)) {
-            // If check_terminal_size failed get current size anyway for display
+        bool size_ok = check_terminal_size(size);
+
+        if (!size_ok) {
             if (!terminal_->get_size(size)) {
                 size.cols = 80; // fallback
                 size.rows = 24;
             }
-            show_terminal_too_small_screen(size);
-            handle_input(); // Handle Q/R input
+
+            // Only redraw the small-screen notice when the size actually changes or when it's not already shown (so it doesn't flicker)
+            if (!showing_small_screen_ || size.cols != last_small_size_.cols || size.rows != last_small_size_.rows) {
+                terminal_->hide_cursor();
+                show_terminal_too_small_screen(size);
+                last_small_size_ = size;
+                showing_small_screen_ = true;
+            }
+
+            handle_input();
+            terminal_->sleep_ms(100);
             continue;
         }
-        
+
+        if (showing_small_screen_) {
+            terminal_->show_cursor();
+            terminal_->clear_screen();
+            terminal_->home_cursor();
+            showing_small_screen_ = false;
+        }
+
         current_size_ = size;
-        
+
         // Initialize or resize renderer if needed
         if (!renderer_ || renderer_->grid().width() != size.cols || renderer_->grid().height() != size.rows) {
             renderer_ = std::make_unique<TUIRenderer>(size.cols, size.rows);
         }
-        
+
         handle_input();
         update();
         render();
-        
+
         // braindead fps limiter
         terminal_->sleep_ms(16);
     }

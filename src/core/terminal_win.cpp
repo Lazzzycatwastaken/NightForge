@@ -48,7 +48,11 @@ bool TerminalWin::init() {
     // This may fail on older Windows versions, which is fine - we'll fall back to Win32 APIs
     DWORD output_mode = original_stdout_mode_;
     output_mode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
-    SetConsoleMode(stdout_handle_, output_mode); // Don't fail if VT processing unavailable
+    if (SetConsoleMode(stdout_handle_, output_mode)) {
+        vt_enabled_ = true;
+    } else {
+        vt_enabled_ = false;
+    }
     
     clear_screen();
     hide_cursor();
@@ -106,24 +110,40 @@ void TerminalWin::sleep_ms(int ms) {
 }
 
 void TerminalWin::clear_screen() {
-    printf("\033[2J");
-    fflush(stdout);
-    
-    // Fallback
-    CONSOLE_SCREEN_BUFFER_INFO csbi;
-    if (GetConsoleScreenBufferInfo(stdout_handle_, &csbi)) {
-        COORD coord = {0, 0};
-        DWORD count;
-        DWORD size = csbi.dwSize.X * csbi.dwSize.Y;
-        FillConsoleOutputCharacter(stdout_handle_, ' ', size, coord, &count);
-        FillConsoleOutputAttribute(stdout_handle_, csbi.wAttributes, size, coord, &count);
+    // If VT is enabled use ANSI clear which is usually handled better
+    // If VT isn't available, use Win32 APIs but only clear the visible window region
+    // instead of filling the whole buffer which can move the cursor across the screen
+    // This will probably not be the end of windows issues afaik.
+    if (vt_enabled_) {
+        printf("\033[2J");
+        fflush(stdout);
+        return;
     }
+
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+    if (!GetConsoleScreenBufferInfo(stdout_handle_, &csbi)) {
+        return;
+    }
+
+    // Calculate the visible window rectangle size and clear only that area
+    int winWidth = csbi.srWindow.Right - csbi.srWindow.Left + 1;
+    int winHeight = csbi.srWindow.Bottom - csbi.srWindow.Top + 1;
+    COORD startCoord = { (SHORT)csbi.srWindow.Left, (SHORT)csbi.srWindow.Top };
+    DWORD cellsToClear = static_cast<DWORD>(winWidth) * static_cast<DWORD>(winHeight);
+    DWORD charsWritten = 0;
+
+    // Move cursor to top-left of window before clearing
+    SetConsoleCursorPosition(stdout_handle_, startCoord);
+    FillConsoleOutputCharacter(stdout_handle_, ' ', cellsToClear, startCoord, &charsWritten);
+    FillConsoleOutputAttribute(stdout_handle_, csbi.wAttributes, cellsToClear, startCoord, &charsWritten);
 }
 
 void TerminalWin::hide_cursor() {
-    printf("\033[?25l");
-    fflush(stdout);
-    
+    if (vt_enabled_) {
+        printf("\033[?25l");
+        fflush(stdout);
+    }
+
     CONSOLE_CURSOR_INFO cursorInfo;
     if (GetConsoleCursorInfo(stdout_handle_, &cursorInfo)) {
         cursorInfo.bVisible = FALSE;
@@ -132,9 +152,11 @@ void TerminalWin::hide_cursor() {
 }
 
 void TerminalWin::show_cursor() {
-    printf("\033[?25h");
-    fflush(stdout);
-    
+    if (vt_enabled_) {
+        printf("\033[?25h");
+        fflush(stdout);
+    }
+
     CONSOLE_CURSOR_INFO cursorInfo;
     if (GetConsoleCursorInfo(stdout_handle_, &cursorInfo)) {
         cursorInfo.bVisible = TRUE;
@@ -143,12 +165,17 @@ void TerminalWin::show_cursor() {
 }
 
 void TerminalWin::home_cursor() {
-    printf("\033[H");
-    fflush(stdout);
+    if (vt_enabled_) {
+        printf("\033[H");
+        fflush(stdout);
+        return;
+    }
 
-    // Fallback
-    COORD coord = {0, 0};
-    SetConsoleCursorPosition(stdout_handle_, coord);
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+    if (GetConsoleScreenBufferInfo(stdout_handle_, &csbi)) {
+        COORD coord = { csbi.srWindow.Left, csbi.srWindow.Top };
+        SetConsoleCursorPosition(stdout_handle_, coord);
+    }
 }
 
 bool TerminalWin::is_initialized() const {

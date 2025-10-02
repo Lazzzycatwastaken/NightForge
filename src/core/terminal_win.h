@@ -30,6 +30,8 @@ private:
     HANDLE stdout_handle_;
     DWORD original_stdin_mode_;
     DWORD original_stdout_mode_;
+    // Whether console supports virtual terminal (ANSI) sequences
+    bool vt_enabled_ = false;
 };
 
 } // namespace nightforge
