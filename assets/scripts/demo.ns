@@ -1,6 +1,2 @@
-start = now()
-
-
-
-print 'done'
-print 'elapsed_seconds = ' + (end_time - start)
+v = input("Type Something: ")
+print v

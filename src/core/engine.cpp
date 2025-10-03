@@ -422,7 +422,7 @@ void Engine::setup_host_functions() {
     });
 
     // now() - return current time in seconds
-    vm_->register_host_function("now", [this](const std::vector<Value>& args) -> Value {
+    vm_->register_host_function("now", [this](const std::vector<Value>&) -> Value {
         using clock = std::chrono::steady_clock;
         auto now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(clock::now().time_since_epoch()).count();
         double seconds = static_cast<double>(now_ns) / 1e9;
@@ -440,6 +440,49 @@ void Engine::setup_host_functions() {
         // TODO: implement actual save/load
         
         return Value::boolean(true); // success
+    });
+
+    vm_->register_host_function("input", [this](const std::vector<Value>& args) -> Value {
+        std::string prompt;
+        if (args.size() > 0 && args[0].type() == ValueType::STRING_ID) {
+            prompt = vm_->strings().get_string(args[0].as_string_id());
+        }
+
+        if (!prompt.empty()) {
+            std::cout << prompt;
+            std::cout.flush();
+        }
+
+        std::string line;
+        if (!std::getline(std::cin, line)) {
+            return Value::nil();
+        }
+
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+
+        try {
+            size_t idx = 0;
+            long long iv = std::stoll(line, &idx);
+            if (idx == line.size()) {
+                return Value::integer(static_cast<int64_t>(iv));
+            }
+        } catch (...) {
+            /* not an integer */
+        }
+
+
+        try {
+            size_t idx = 0;
+            double dv = std::stod(line, &idx);
+            if (idx == line.size()) {
+                return Value::floating(dv);
+            }
+        } catch (...) {
+            /* not a float */
+        }
+
+        uint32_t id = vm_->strings().intern(line);
+        return Value::string_id(id);
     });
 
     // Simple test function
