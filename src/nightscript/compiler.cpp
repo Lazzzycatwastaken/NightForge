@@ -235,6 +235,23 @@ void Compiler::statement() {
             // function call with parentheses
             current_ = saved_current;
             expression_statement();
+        } else if (next.type == TokenType::STRING || next.type == TokenType::NUMBER || next.type == TokenType::BOOLEAN || next.type == TokenType::NIL || next.type == TokenType::IDENTIFIER) {
+            // Bare function call with one or more expressions as arguments ex. `Wait 1`
+            Token name = current_token();
+            advance();
+
+            int arg_count = 0;
+            while (check(TokenType::STRING) || check(TokenType::NUMBER) || check(TokenType::BOOLEAN) || check(TokenType::NIL) || check(TokenType::LEFT_PAREN) || check(TokenType::IDENTIFIER)) {
+                expression();
+                arg_count++;
+            }
+
+            uint32_t name_id = strings_->intern(name.lexeme);
+            size_t name_const = chunk_->add_constant(Value::string_id(name_id));
+            emit_byte(static_cast<uint8_t>(OpCode::OP_CALL_HOST));
+            emit_byte(static_cast<uint8_t>(name_const));
+            emit_byte(static_cast<uint8_t>(arg_count));
+            emit_byte(static_cast<uint8_t>(OpCode::OP_POP)); // discard call result
         } else if (next.type == TokenType::NEWLINE || next.type == TokenType::EOF_TOKEN) {
             // bare identifier as zero-arg call
             Token name = current_token();

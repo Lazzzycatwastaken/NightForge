@@ -5,3 +5,9 @@ if x is 1 then
 else
     print x
 end
+
+while x > 0 do
+    print x
+    x = x - 1
+    wait 1
+end

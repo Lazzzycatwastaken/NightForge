@@ -19,3 +19,4 @@ assets/scripts/test_nested_while.ns
 assets/scripts/test_nil_while.ns
 assets/scripts/test_simple_while.ns
 assets/scripts/test_while.ns
+vscode-extension/
