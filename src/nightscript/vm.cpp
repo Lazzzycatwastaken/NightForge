@@ -2,6 +2,8 @@
 #include <iostream>
 #include <cstdarg>
 #include <cstring>
+#include <algorithm>
+#include <cctype>
 
 namespace nightforge {
 namespace nightscript {
@@ -247,7 +249,13 @@ VMResult VM::run(const Chunk& chunk) {
                 }
                 
                 std::string func_name = strings_.get_string(function_name.as.string_id);
+                // case-insensitive host lookup (so typos wont mess up now)
+                std::string func_name_lc = func_name;
+                std::transform(func_name_lc.begin(), func_name_lc.end(), func_name_lc.begin(), [](unsigned char c){ return std::tolower(c); });
                 auto it = host_functions_.find(func_name);
+                if (it == host_functions_.end()) {
+                    it = host_functions_.find(func_name_lc);
+                }
 
                 // Collect arguments from stack
                 std::vector<Value> args;
