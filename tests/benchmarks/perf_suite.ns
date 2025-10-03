@@ -1,0 +1,63 @@
+print "=== NightScript Performance Suite ==="
+
+# Configuration (tweak for your machine)
+INT_ITER = 2000000
+FLOAT_ITER = 2000000
+FUNC_CALLS = 200000
+HOST_CALLS = 50000
+STR_CONCAT = 20000
+
+start_total = now()
+
+# Integer arithmetic
+t0 = now()
+s = 0
+for i = 1, INT_ITER do
+    s = s + i
+end
+t1 = now()
+print "int_loop_seconds = " + (t1 - t0)
+
+# Floating point arithmetic
+t0 = now()
+fs = 0.0
+for i = 1, FLOAT_ITER do
+    fs = fs + 1.234567
+end
+t1 = now()
+print "float_loop_seconds = " + (t1 - t0)
+
+# Function call overhead
+function inc(x)
+    return x + 1
+end
+
+t0 = now()
+v = 0
+for i = 1, FUNC_CALLS do
+    v = inc(v)
+end
+t1 = now()
+print "func_call_seconds = " + (t1 - t0)
+
+#  Host call overhead (set/get variable)
+t0 = now()
+for i = 1, HOST_CALLS do
+    set_variable "benchvar" i
+    v = get_variable "benchvar"
+end
+t1 = now()
+print "host_call_seconds = " + (t1 - t0)
+
+# String concatenation (stress intern & GC)
+t0 = now()
+text = "x"
+for i = 1, STR_CONCAT do
+    text = text + "-" + i
+end
+t1 = now()
+print "string_concat_seconds = " + (t1 - t0)
+
+end_total = now()
+print "total_seconds = " + (end_total - start_total)
+print "=== Suite Complete ==="

@@ -10,6 +10,8 @@ std::unordered_map<std::string, TokenType> Lexer::keywords_ = {
     {"scene", TokenType::SCENE}, //these are in-engine only
     {"character", TokenType::CHARACTER},
     {"dialogue", TokenType::DIALOGUE},
+    {"table", TokenType::TABLE},
+    {"for", TokenType::FOR},
     {"if", TokenType::IF},
     {"elseif", TokenType::ELSEIF},
     {"else", TokenType::ELSE},
@@ -76,9 +78,12 @@ Token Lexer::next_token() {
         return token;
     }
     
-    // String literals
+    // String literals (double or single quotes)
     if (c == '"') {
-        return string_token();
+        return string_token('"');
+    }
+    if (c == '\'') {
+        return string_token('\'');
     }
     
     // Numbers
@@ -124,6 +129,7 @@ Token Lexer::next_token() {
         case '-': return make_token(TokenType::MINUS);
         case '*': return make_token(TokenType::MULTIPLY);
         case '/': return make_token(TokenType::DIVIDE);
+    case '%': return make_token(TokenType::MODULO);
         case '<': return make_token(TokenType::LESS);
         case '>': return make_token(TokenType::GREATER);
         case '!': return make_token(TokenType::NOT);
@@ -179,10 +185,10 @@ Token Lexer::make_token(TokenType type, const std::string& lexeme) {
     return Token(type, lexeme, line_, column_ - lexeme.length());
 }
 
-Token Lexer::string_token() {
+Token Lexer::string_token(char quote_char) {
     std::string value;
     
-    while (!is_at_end() && peek() != '"') {
+    while (!is_at_end() && peek() != quote_char) {
         if (peek() == '\n') {
             line_++;
             column_ = 0; // will be incremented by advance()
@@ -197,6 +203,7 @@ Token Lexer::string_token() {
                     case 'r': value += '\r'; break;
                     case '\\': value += '\\'; break;
                     case '"': value += '"'; break;
+                    case '\'': value += '\''; break;
                     default: 
                         value += '\\';
                         value += escaped;

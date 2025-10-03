@@ -1,0 +1,61 @@
+print "=== NightScript Quick Perf ==="
+INT_ITER = 10000
+FLOAT_ITER = 10000
+FUNC_CALLS = 1000
+HOST_CALLS = 500
+STR_CONCAT = 100
+
+start_total = now()
+
+print "running int loop"
+t0 = now()
+s = 0
+for i = 1, INT_ITER do
+    s = s + i
+end
+t1 = now()
+print "int_loop_seconds = " + (t1 - t0)
+
+print "running float loop"
+t0 = now()
+fs = 0.0
+for i = 1, FLOAT_ITER do
+    fs = fs + 1.234567
+end
+t1 = now()
+print "float_loop_seconds = " + (t1 - t0)
+
+print "running func calls"
+function inc(x)
+    return x + 1
+end
+
+t0 = now()
+v = 0
+for i = 1, FUNC_CALLS do
+    v = inc(v)
+end
+t1 = now()
+print "func_call_seconds = " + (t1 - t0)
+
+print "running host calls"
+t0 = now()
+for i = 1, HOST_CALLS do
+    set_variable "benchvar" i
+    v = get_variable "benchvar"
+end
+t1 = now()
+print "host_call_seconds = " + (t1 - t0)
+
+print "running string concat"
+t0 = now()
+text = "x"
+for i = 1, STR_CONCAT do
+    text = text + "-" + i
+end
+t1 = now()
+print "string_concat_seconds = " + (t1 - t0)
+
+end_total = now()
+print "total_seconds = " + (end_total - start_total)
+print "=== Quick Perf Complete ==="

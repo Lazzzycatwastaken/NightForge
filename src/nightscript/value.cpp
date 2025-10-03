@@ -38,9 +38,9 @@ Value Chunk::get_constant(size_t index) const {
     return constants_[index];
 }
 
-size_t Chunk::add_function(const Chunk& function_chunk, const std::string& param_name, const std::string& function_name) {
+size_t Chunk::add_function(const Chunk& function_chunk, const std::vector<std::string>& param_names, const std::string& function_name) {
     functions_.push_back(function_chunk);
-    function_params_.push_back(param_name);
+    function_params_.push_back(param_names);
     function_names_.push_back(function_name);
     return functions_.size() - 1;
 }
@@ -49,7 +49,7 @@ const Chunk& Chunk::get_function(size_t index) const {
     return functions_[index];
 }
 
-const std::string& Chunk::get_function_param_name(size_t index) const {
+const std::vector<std::string>& Chunk::get_function_param_names(size_t index) const {
     return function_params_[index];
 }
 
@@ -60,15 +60,42 @@ ssize_t Chunk::get_function_index(const std::string& name) const {
     return -1;
 }
 
-// String table implementation
+size_t Chunk::function_count() const {
+    return function_names_.size();
+}
+
+const std::string& Chunk::function_name(size_t index) const {
+    return function_names_[index];
+}
+
+void Chunk::add_function_name(const std::string& name) {
+    function_names_.push_back(name);
+}
+
+void Chunk::add_function_name_to_child(size_t child_index, const std::string& name) {
+    if (child_index < functions_.size()) {
+        functions_[child_index].function_names_.push_back(name);
+    }
+}
+
+// Optimized String table implementation
 uint32_t StringTable::intern(const std::string& str) {
     auto it = string_to_id_.find(str);
     if (it != string_to_id_.end()) {
+        strings_[it->second].ref_count++;
         return it->second; // already interned
     }
     
-    uint32_t id = static_cast<uint32_t>(strings_.size());
-    strings_.push_back(str);
+    uint32_t id;
+    if (!free_slots_.empty()) {
+        id = free_slots_.back();
+        free_slots_.pop_back();
+        strings_[id] = {str, false, 1};
+    } else {
+        id = static_cast<uint32_t>(strings_.size());
+        strings_.push_back({str, false, 1});
+    }
+    
     string_to_id_[str] = id;
     return id;
 }
@@ -76,10 +103,53 @@ uint32_t StringTable::intern(const std::string& str) {
 const std::string& StringTable::get_string(uint32_t id) const {
     static const std::string empty_string = "";
     
-    if (id >= strings_.size()) {
-        return empty_string; // safe fallback
+    if (id >= strings_.size() || strings_[id].str.empty()) {
+        return empty_string;
     }
-    return strings_[id];
+    return strings_[id].str;
+}
+
+void StringTable::mark_string_reachable(uint32_t id) {
+    if (id < strings_.size()) {
+        strings_[id].gc_marked = true;
+    }
+}
+
+void StringTable::sweep_unreachable_strings() {
+    for (uint32_t i = 0; i < strings_.size(); i++) {
+        if (!strings_[i].gc_marked && !strings_[i].str.empty()) {
+            // String is unreachable free it
+            string_to_id_.erase(strings_[i].str);
+            strings_[i].str.clear();
+            strings_[i].ref_count = 0;
+            free_slots_.push_back(i);
+        }
+    }
+}
+
+void StringTable::clear_gc_marks() {
+    for (auto& entry : strings_) {
+        entry.gc_marked = false;
+    }
+}
+
+size_t StringTable::memory_usage() const {
+    size_t total = 0;
+    for (const auto& entry : strings_) {
+        total += entry.str.capacity();
+    }
+    return total;
+}
+
+uint32_t StringTable::concat_strings(uint32_t id1, uint32_t id2) {
+    const std::string& str1 = get_string(id1);
+    const std::string& str2 = get_string(id2);
+    return intern(str1 + str2);
+}
+
+uint32_t StringTable::concat_string_literal(uint32_t id, const std::string& literal) {
+    const std::string& str = get_string(id);
+    return intern(str + literal);
 }
 
 } // namespace nightscript

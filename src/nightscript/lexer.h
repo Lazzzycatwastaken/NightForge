@@ -18,6 +18,8 @@ enum class TokenType {
     SCENE,
     CHARACTER,
     DIALOGUE,
+    TABLE,
+    FOR,
     IF,
     ELSEIF,
     ELSE,
@@ -39,6 +41,7 @@ enum class TokenType {
     MINUS,       // -
     MULTIPLY,    // *
     DIVIDE,      // /
+    MODULO,      // %
     EQUAL,       // ==
     NOT_EQUAL,   // !=
     LESS,        // <
@@ -98,7 +101,7 @@ private:
     
     Token make_token(TokenType type);
     Token make_token(TokenType type, const std::string& lexeme);
-    Token string_token();
+    Token string_token(char quote_char = '"');
     Token number_token();
     Token identifier_token();
     void skip_comment();

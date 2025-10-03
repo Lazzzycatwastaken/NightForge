@@ -1,9 +1,20 @@
 #pragma once
 #include "lexer.h"
 #include "value.h"
+#include <unordered_map>
 
 namespace nightforge {
 namespace nightscript {
+
+// Type inference for optimized opcode emission
+enum class InferredType {
+    UNKNOWN,
+    INTEGER,
+    FLOAT,
+    STRING,
+    BOOLEAN,
+    NIL
+};
 
 class Compiler {
 public:
@@ -16,6 +27,16 @@ private:
     size_t current_;
     Chunk* chunk_;
     StringTable* strings_;
+    
+    std::unordered_map<std::string, InferredType> variable_types_;
+    InferredType last_expression_type_;
+    
+    // Performance stats
+    struct CompileStats {
+        size_t specialized_ops_emitted = 0;
+        size_t generic_ops_emitted = 0;
+        size_t tail_calls_optimized = 0;
+    } stats_;
     
     // Parser state
     Token current_token();
@@ -41,15 +62,31 @@ private:
     void print_statement();
     void if_statement();
     void while_statement();
+         void for_statement();
+    void return_statement();
     size_t emit_jump(uint8_t instruction);
     void patch_jump(size_t jump_position);
     void function_declaration();
+    void table_declaration();
     void call_expression();
     
     // Helper methods
     int get_precedence(TokenType type);
     bool is_binary_operator(TokenType type);
     OpCode token_to_opcode(TokenType type);
+    
+    InferredType infer_literal_type(const Token& token);
+    InferredType infer_variable_type(const std::string& name);
+    void set_variable_type(const std::string& name, InferredType type);
+    OpCode get_specialized_opcode(TokenType op, InferredType left_type, InferredType right_type);
+    void emit_optimized_binary_op(TokenType op, InferredType left_type, InferredType right_type);
+    
+    bool is_tail_position_;
+    void emit_tail_call_optimized(const std::string& func_name, uint8_t arg_count);
+    
+    // Bytecode caching
+    bool load_cached_bytecode(const std::string& source_path, Chunk& chunk);
+    void save_bytecode_cache(const std::string& source_path, const Chunk& chunk);
     
     // Bytecode emission
     void emit_byte(uint8_t byte);
