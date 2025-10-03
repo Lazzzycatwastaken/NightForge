@@ -944,11 +944,11 @@ void Compiler::save_bytecode_cache(const std::string& source_path, const Chunk& 
     cache_file.write(reinterpret_cast<const char*>(&constants_count), sizeof(constants_count));
     
     for (const auto& constant : constants) {
-        uint8_t type = static_cast<uint8_t>(constant.type);
+        uint8_t type = static_cast<uint8_t>(constant.type());
         cache_file.write(reinterpret_cast<const char*>(&type), sizeof(type));
         
-        if (constant.type == ValueType::STRING_ID) {
-            const std::string& str = strings_->get_string(constant.as.string_id);
+        if (constant.type() == ValueType::STRING_ID) {
+            const std::string& str = strings_->get_string(constant.as_string_id());
             uint32_t str_len = static_cast<uint32_t>(str.length());
             cache_file.write(reinterpret_cast<const char*>(&str_len), sizeof(str_len));
             cache_file.write(str.c_str(), str_len);

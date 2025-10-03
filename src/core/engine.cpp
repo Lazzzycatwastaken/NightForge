@@ -240,12 +240,12 @@ void Engine::setup_host_functions() {
 
     // show_text(string) - display text in dialogue panel
     vm_->register_host_function("show_text", [this](const std::vector<Value>& args) -> Value {
-        if (args.size() != 1 || args[0].type != ValueType::STRING_ID) {
+        if (args.size() != 1 || args[0].type() != ValueType::STRING_ID) {
             std::cerr << "show_text: expected string argument" << std::endl;
             return Value::nil();
         }
         
-        std::string text = vm_->strings().get_string(args[0].as.string_id);
+        std::string text = vm_->strings().get_string(args[0].as_string_id());
         std::cout << "[SHOW_TEXT] " << text << std::endl;
         // TODO: integrate with TUI renderer properly
         
@@ -254,12 +254,12 @@ void Engine::setup_host_functions() {
     
     // log(string) - debug output  
     vm_->register_host_function("log", [this](const std::vector<Value>& args) -> Value {
-        if (args.size() != 1 || args[0].type != ValueType::STRING_ID) {
+        if (args.size() != 1 || args[0].type() != ValueType::STRING_ID) {
             std::cerr << "log: expected string argument" << std::endl;
             return Value::nil();
         }
         
-        std::string message = vm_->strings().get_string(args[0].as.string_id);
+        std::string message = vm_->strings().get_string(args[0].as_string_id());
         std::cout << "[LOG] " << message << std::endl;
         
         return Value::nil();
@@ -272,10 +272,10 @@ void Engine::setup_host_functions() {
         }
         
         double seconds = 0.0;
-        if (args[0].type == ValueType::INT) {
-            seconds = static_cast<double>(args[0].as.integer);
-        } else if (args[0].type == ValueType::FLOAT) {
-            seconds = args[0].as.floating;
+        if (args[0].type() == ValueType::INT) {
+            seconds = static_cast<double>(args[0].as_integer());
+        } else if (args[0].type() == ValueType::FLOAT) {
+            seconds = args[0].as_floating();
         } else {
             std::cerr << "wait: expected number argument" << std::endl;
             return Value::nil();
@@ -308,10 +308,10 @@ void Engine::setup_host_functions() {
         }
         
         int milliseconds = 0;
-        if (args[0].type == ValueType::INT) {
-            milliseconds = static_cast<int>(args[0].as.integer);
-        } else if (args[0].type == ValueType::FLOAT) {
-            milliseconds = static_cast<int>(args[0].as.floating);
+        if (args[0].type() == ValueType::INT) {
+            milliseconds = static_cast<int>(args[0].as_integer());
+        } else if (args[0].type() == ValueType::FLOAT) {
+            milliseconds = static_cast<int>(args[0].as_floating());
         } else {
             std::cerr << "wait_ms: expected number argument" << std::endl;
             return Value::nil();
@@ -339,12 +339,12 @@ void Engine::setup_host_functions() {
     
     // show_scene(string) - transition to a scene
     vm_->register_host_function("show_scene", [this](const std::vector<Value>& args) -> Value {
-        if (args.size() != 1 || args[0].type != ValueType::STRING_ID) {
+        if (args.size() != 1 || args[0].type() != ValueType::STRING_ID) {
             std::cerr << "show_scene: expected string argument (scene name)" << std::endl;
             return Value::nil();
         }
         
-        std::string scene_name = vm_->strings().get_string(args[0].as.string_id);
+        std::string scene_name = vm_->strings().get_string(args[0].as_string_id());
         std::cout << "[SHOW_SCENE] Transitioning to: " << scene_name << std::endl;
         // TODO: integrate with scene manager
         
@@ -353,14 +353,14 @@ void Engine::setup_host_functions() {
     
     // show_choice(string, string) 
     vm_->register_host_function("show_choice", [this](const std::vector<Value>& args) -> Value {
-        if (args.size() < 1 || args[0].type != ValueType::STRING_ID) {
+        if (args.size() < 1 || args[0].type() != ValueType::STRING_ID) {
             std::cerr << "show_choice: expected at least 1 string argument (choice text)" << std::endl;
             return Value::nil();
         }
         
-        std::string choice_text = vm_->strings().get_string(args[0].as.string_id);
-        std::string target = (args.size() > 1 && args[1].type == ValueType::STRING_ID) 
-            ? vm_->strings().get_string(args[1].as.string_id) : "default";
+        std::string choice_text = vm_->strings().get_string(args[0].as_string_id());
+        std::string target = (args.size() > 1 && args[1].type() == ValueType::STRING_ID) 
+            ? vm_->strings().get_string(args[1].as_string_id()) : "default";
         
         std::cout << "[SHOW_CHOICE] " << choice_text << " -> " << target << std::endl;
         // TODO: integrate with choice system
@@ -370,22 +370,22 @@ void Engine::setup_host_functions() {
     
     // set_variable(string, value) - set a game variable
     vm_->register_host_function("set_variable", [this](const std::vector<Value>& args) -> Value {
-        if (args.size() != 2 || args[0].type != ValueType::STRING_ID) {
+        if (args.size() != 2 || args[0].type() != ValueType::STRING_ID) {
             std::cerr << "set_variable: expected (string, value) arguments" << std::endl;
             return Value::nil();
         }
         
-        std::string var_name = vm_->strings().get_string(args[0].as.string_id);
+        std::string var_name = vm_->strings().get_string(args[0].as_string_id());
         // Set as global in VM for now - in full game this would go to save state
         vm_->set_global(var_name, args[1]);
         
         std::cout << "[SET_VAR] " << var_name << " = ";
-        switch (args[1].type) {
+        switch (args[1].type()) {
             case ValueType::NIL: std::cout << "nil"; break;
-            case ValueType::BOOL: std::cout << (args[1].as.boolean ? "true" : "false"); break;
-            case ValueType::INT: std::cout << args[1].as.integer; break;
-            case ValueType::FLOAT: std::cout << args[1].as.floating; break;
-            case ValueType::STRING_ID: std::cout << "\"" << vm_->strings().get_string(args[1].as.string_id) << "\""; break;
+            case ValueType::BOOL: std::cout << (args[1].as_boolean() ? "true" : "false"); break;
+            case ValueType::INT: std::cout << args[1].as_integer(); break;
+            case ValueType::FLOAT: std::cout << args[1].as_floating(); break;
+            case ValueType::STRING_ID: std::cout << "\"" << vm_->strings().get_string(args[1].as_string_id()) << "\""; break;
             case ValueType::TABLE_ID: std::cout << "<table>"; break;
             default: std::cout << "<unknown>"; break;
         }
@@ -396,12 +396,12 @@ void Engine::setup_host_functions() {
     
     // get_variable(string) - get a game variable
     vm_->register_host_function("get_variable", [this](const std::vector<Value>& args) -> Value {
-        if (args.size() != 1 || args[0].type != ValueType::STRING_ID) {
+        if (args.size() != 1 || args[0].type() != ValueType::STRING_ID) {
             std::cerr << "get_variable: expected string argument (variable name)" << std::endl;
             return Value::nil();
         }
         
-        std::string var_name = vm_->strings().get_string(args[0].as.string_id);
+        std::string var_name = vm_->strings().get_string(args[0].as_string_id());
         Value result = vm_->get_global(var_name);
         
         std::cout << "[GET_VAR] " << var_name << std::endl;
@@ -411,8 +411,8 @@ void Engine::setup_host_functions() {
     // save_state(string) - save game state to file
     vm_->register_host_function("save_state", [this](const std::vector<Value>& args) -> Value {
         std::string save_name = "quicksave";
-        if (args.size() > 0 && args[0].type == ValueType::STRING_ID) {
-            save_name = vm_->strings().get_string(args[0].as.string_id);
+        if (args.size() > 0 && args[0].type() == ValueType::STRING_ID) {
+            save_name = vm_->strings().get_string(args[0].as_string_id());
         }
         
         std::cout << "[SAVE_STATE] Saving to: " << save_name << std::endl;
@@ -432,8 +432,8 @@ void Engine::setup_host_functions() {
     // load_state(string) - load game state from file
     vm_->register_host_function("load_state", [this](const std::vector<Value>& args) -> Value {
         std::string save_name = "quicksave";
-        if (args.size() > 0 && args[0].type == ValueType::STRING_ID) {
-            save_name = vm_->strings().get_string(args[0].as.string_id);
+        if (args.size() > 0 && args[0].type() == ValueType::STRING_ID) {
+            save_name = vm_->strings().get_string(args[0].as_string_id());
         }
         
         std::cout << "[LOAD_STATE] Loading from: " << save_name << std::endl;

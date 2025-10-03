@@ -49,13 +49,13 @@ void VM::print_stack() {
     std::cout << "Stack: ";
     for (Value* slot = stack_; slot < stack_top_; ++slot) {
         std::cout << "[";
-        switch (slot->type) {
+        switch (slot->type()) {
             case ValueType::NIL: std::cout << "nil"; break;
-            case ValueType::BOOL: std::cout << (slot->as.boolean ? "true" : "false"); break;
-            case ValueType::INT: std::cout << slot->as.integer; break;
-            case ValueType::FLOAT: std::cout << slot->as.floating; break;
+            case ValueType::BOOL: std::cout << (slot->as_boolean() ? "true" : "false"); break;
+            case ValueType::INT: std::cout << slot->as_integer(); break;
+            case ValueType::FLOAT: std::cout << slot->as_floating(); break;
             case ValueType::STRING_ID: 
-                std::cout << "\"" << strings_.get_string(slot->as.string_id) << "\""; 
+                std::cout << "\"" << strings_.get_string(slot->as_string_id()) << "\""; 
                 break;
             default: std::cout << "unknown"; break;
         }
@@ -156,14 +156,14 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
             case OpCode::OP_ADD_INT: {
                 Value b = pop();
                 Value a = pop();
-                push(Value::integer(a.as.integer + b.as.integer));
+                push(Value::integer(a.as_integer() + b.as_integer()));
                 break;
             }
             
             case OpCode::OP_ADD_FLOAT: {
                 Value b = pop();
                 Value a = pop();
-                push(Value::floating(a.as.floating + b.as.floating));
+                push(Value::floating(a.as_floating() + b.as_floating()));
                 break;
             }
             
@@ -175,30 +175,30 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
                 std::string str_a, str_b;
                 
                 // Convert a to string
-                if (a.type == ValueType::STRING_ID) {
-                    str_a = strings_.get_string(a.as.string_id);
-                } else if (a.type == ValueType::INT) {
-                    str_a = std::to_string(a.as.integer);
-                } else if (a.type == ValueType::FLOAT) {
-                    str_a = std::to_string(a.as.floating);
-                } else if (a.type == ValueType::BOOL) {
-                    str_a = a.as.boolean ? "true" : "false";
-                } else if (a.type == ValueType::NIL) {
+                if (a.type() == ValueType::STRING_ID) {
+                    str_a = strings_.get_string(a.as_string_id());
+                } else if (a.type() == ValueType::INT) {
+                    str_a = std::to_string(a.as_integer());
+                } else if (a.type() == ValueType::FLOAT) {
+                    str_a = std::to_string(a.as_floating());
+                } else if (a.type() == ValueType::BOOL) {
+                    str_a = a.as_boolean() ? "true" : "false";
+                } else if (a.type() == ValueType::NIL) {
                     str_a = "nil";
                 } else {
                     str_a = "unknown";
                 }
                 
                 // Convert b to string
-                if (b.type == ValueType::STRING_ID) {
-                    str_b = strings_.get_string(b.as.string_id);
-                } else if (b.type == ValueType::INT) {
-                    str_b = std::to_string(b.as.integer);
-                } else if (b.type == ValueType::FLOAT) {
-                    str_b = std::to_string(b.as.floating);
-                } else if (b.type == ValueType::BOOL) {
-                    str_b = b.as.boolean ? "true" : "false";
-                } else if (b.type == ValueType::NIL) {
+                if (b.type() == ValueType::STRING_ID) {
+                    str_b = strings_.get_string(b.as_string_id());
+                } else if (b.type() == ValueType::INT) {
+                    str_b = std::to_string(b.as_integer());
+                } else if (b.type() == ValueType::FLOAT) {
+                    str_b = std::to_string(b.as_floating());
+                } else if (b.type() == ValueType::BOOL) {
+                    str_b = b.as_boolean() ? "true" : "false";
+                } else if (b.type() == ValueType::NIL) {
                     str_b = "nil";
                 } else {
                     str_b = "unknown";
@@ -220,75 +220,75 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
             case OpCode::OP_SUB_INT: {
                 Value b = pop();
                 Value a = pop();
-                push(Value::integer(a.as.integer - b.as.integer));
+                push(Value::integer(a.as_integer() - b.as_integer()));
                 break;
             }
             
             case OpCode::OP_SUB_FLOAT: {
                 Value b = pop();
                 Value a = pop();
-                push(Value::floating(a.as.floating - b.as.floating));
+                push(Value::floating(a.as_floating() - b.as_floating()));
                 break;
             }
             
             case OpCode::OP_MUL_INT: {
                 Value b = pop();
                 Value a = pop();
-                push(Value::integer(a.as.integer * b.as.integer));
+                push(Value::integer(a.as_integer() * b.as_integer()));
                 break;
             }
             
             case OpCode::OP_MUL_FLOAT: {
                 Value b = pop();
                 Value a = pop();
-                push(Value::floating(a.as.floating * b.as.floating));
+                push(Value::floating(a.as_floating() * b.as_floating()));
                 break;
             }
             
             case OpCode::OP_DIV_INT: {
                 Value b = pop();
                 Value a = pop();
-                if (b.as.integer == 0) {
+                if (b.as_integer() == 0) {
                     runtime_error("Division by zero");
                     return VMResult::RUNTIME_ERROR;
                 }
-                push(Value::integer(a.as.integer / b.as.integer));
+                push(Value::integer(a.as_integer() / b.as_integer()));
                 break;
             }
             
             case OpCode::OP_DIV_FLOAT: {
                 Value b = pop();
                 Value a = pop();
-                if (b.as.floating == 0.0) {
+                if (b.as_floating() == 0.0) {
                     runtime_error("Division by zero");
                     return VMResult::RUNTIME_ERROR;
                 }
-                push(Value::floating(a.as.floating / b.as.floating));
+                push(Value::floating(a.as_floating() / b.as_floating()));
                 break;
             }
             
             case OpCode::OP_MOD_INT: {
                 Value b = pop();
                 Value a = pop();
-                if (b.as.integer == 0) {
+                if (b.as_integer() == 0) {
                     runtime_error("Modulo by zero");
                     return VMResult::RUNTIME_ERROR;
                 }
-                push(Value::integer(a.as.integer % b.as.integer));
+                push(Value::integer(a.as_integer() % b.as_integer()));
                 break;
             }
                 
             case OpCode::OP_NOT: {
                 Value value = pop();
-                bool is_falsy = (value.type == ValueType::NIL) || 
-                               (value.type == ValueType::BOOL && !value.as.boolean);
+                bool is_falsy = (value.type() == ValueType::NIL) || 
+                               (value.type() == ValueType::BOOL && !value.as_boolean());
                 push(Value::boolean(is_falsy));
                 break;
             }
 
             case OpCode::OP_JUMP_IF_FALSE: {
                 Value cond = pop();
-                bool is_false = (cond.type == ValueType::NIL) || (cond.type == ValueType::BOOL && !cond.as.boolean);
+                bool is_false = (cond.type() == ValueType::NIL) || (cond.type() == ValueType::BOOL && !cond.as_boolean());
                 uint8_t offset = read_byte(ip);
                 if (is_false) {
                     ip += offset;
@@ -313,13 +313,13 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
                 Value a = pop();
                 // Simple equality (could be better)
                 bool equal = false;
-                if (a.type == b.type) {
-                    switch (a.type) {
+                if (a.type() == b.type()) {
+                    switch (a.type()) {
                         case ValueType::NIL: equal = true; break;
-                        case ValueType::BOOL: equal = a.as.boolean == b.as.boolean; break;
-                        case ValueType::INT: equal = a.as.integer == b.as.integer; break;
-                        case ValueType::FLOAT: equal = a.as.floating == b.as.floating; break;
-                        case ValueType::STRING_ID: equal = a.as.string_id == b.as.string_id; break;
+                        case ValueType::BOOL: equal = a.as_boolean() == b.as_boolean(); break;
+                        case ValueType::INT: equal = a.as_integer() == b.as_integer(); break;
+                        case ValueType::FLOAT: equal = a.as_floating() == b.as_floating(); break;
+                        case ValueType::STRING_ID: equal = a.as_string_id() == b.as_string_id(); break;
                         default: equal = false; break;
                     }
                 }
@@ -331,10 +331,10 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
                 Value b = pop();
                 Value a = pop();
                 bool result = false;
-                if (a.type == b.type) {
-                    switch (a.type) {
-                        case ValueType::INT: result = a.as.integer > b.as.integer; break;
-                        case ValueType::FLOAT: result = a.as.floating > b.as.floating; break;
+                if (a.type() == b.type()) {
+                    switch (a.type()) {
+                        case ValueType::INT: result = a.as_integer() > b.as_integer(); break;
+                        case ValueType::FLOAT: result = a.as_floating() > b.as_floating(); break;
                         default: result = false; break;
                     }
                 }
@@ -346,10 +346,10 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
                 Value b = pop();
                 Value a = pop();
                 bool result = false;
-                if (a.type == b.type) {
-                    switch (a.type) {
-                        case ValueType::INT: result = a.as.integer >= b.as.integer; break;
-                        case ValueType::FLOAT: result = a.as.floating >= b.as.floating; break;
+                if (a.type() == b.type()) {
+                    switch (a.type()) {
+                        case ValueType::INT: result = a.as_integer() >= b.as_integer(); break;
+                        case ValueType::FLOAT: result = a.as_floating() >= b.as_floating(); break;
                         default: result = false; break;
                     }
                 }
@@ -361,10 +361,10 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
                 Value b = pop();
                 Value a = pop();
                 bool result = false;
-                if (a.type == b.type) {
-                    switch (a.type) {
-                        case ValueType::INT: result = a.as.integer <= b.as.integer; break;
-                        case ValueType::FLOAT: result = a.as.floating <= b.as.floating; break;
+                if (a.type() == b.type()) {
+                    switch (a.type()) {
+                        case ValueType::INT: result = a.as_integer() <= b.as_integer(); break;
+                        case ValueType::FLOAT: result = a.as_floating() <= b.as_floating(); break;
                         default: result = false; break;
                     }
                 }
@@ -376,10 +376,10 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
                 Value b = pop();
                 Value a = pop();
                 bool result = false;
-                if (a.type == b.type) {
-                    switch (a.type) {
-                        case ValueType::INT: result = a.as.integer < b.as.integer; break;
-                        case ValueType::FLOAT: result = a.as.floating < b.as.floating; break;
+                if (a.type() == b.type()) {
+                    switch (a.type()) {
+                        case ValueType::INT: result = a.as_integer() < b.as_integer(); break;
+                        case ValueType::FLOAT: result = a.as_floating() < b.as_floating(); break;
                         default: result = false; break;
                     }
                 }
@@ -389,13 +389,13 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
             
             case OpCode::OP_PRINT: {
                 Value value = pop();
-                switch (value.type) {
+                switch (value.type()) {
                     case ValueType::NIL: std::cout << "nil"; break;
-                    case ValueType::BOOL: std::cout << (value.as.boolean ? "true" : "false"); break;
-                    case ValueType::INT: std::cout << value.as.integer; break;
-                    case ValueType::FLOAT: std::cout << value.as.floating; break;
+                    case ValueType::BOOL: std::cout << (value.as_boolean() ? "true" : "false"); break;
+                    case ValueType::INT: std::cout << value.as_integer(); break;
+                    case ValueType::FLOAT: std::cout << value.as_floating(); break;
                     case ValueType::STRING_ID: 
-                        std::cout << strings_.get_string(value.as.string_id); 
+                        std::cout << strings_.get_string(value.as_string_id()); 
                         break;
                     default: std::cout << "unknown"; break;
                 }
@@ -405,13 +405,13 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
             
             case OpCode::OP_PRINT_SPACE: {
                 Value value = pop();
-                switch (value.type) {
+                switch (value.type()) {
                     case ValueType::NIL: std::cout << "nil"; break;
-                    case ValueType::BOOL: std::cout << (value.as.boolean ? "true" : "false"); break;
-                    case ValueType::INT: std::cout << value.as.integer; break;
-                    case ValueType::FLOAT: std::cout << value.as.floating; break;
+                    case ValueType::BOOL: std::cout << (value.as_boolean() ? "true" : "false"); break;
+                    case ValueType::INT: std::cout << value.as_integer(); break;
+                    case ValueType::FLOAT: std::cout << value.as_floating(); break;
                     case ValueType::STRING_ID: 
-                        std::cout << strings_.get_string(value.as.string_id); 
+                        std::cout << strings_.get_string(value.as_string_id()); 
                         break;
                     default: std::cout << "unknown"; break;
                 }
@@ -423,12 +423,12 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
                 Value function_name = read_constant(chunk, ip);
                 uint8_t arg_count = read_byte(ip);
                 
-                if (function_name.type != ValueType::STRING_ID) {
+                if (function_name.type() != ValueType::STRING_ID) {
                     runtime_error("Expected function name");
                     return VMResult::RUNTIME_ERROR;
                 }
                 
-                std::string func_name = strings_.get_string(function_name.as.string_id);
+                std::string func_name = strings_.get_string(function_name.as_string_id());
                 // Convert to lowercase for case-insensitive lookup
                 std::string func_name_lc = func_name;
                 std::transform(func_name_lc.begin(), func_name_lc.end(), func_name_lc.begin(), [](unsigned char c){ return std::tolower(c); });
@@ -582,12 +582,12 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
                 Value function_name = read_constant(chunk, ip);
                 uint8_t arg_count = read_byte(ip);
                 
-                if (function_name.type != ValueType::STRING_ID) {
+                if (function_name.type() != ValueType::STRING_ID) {
                     runtime_error("Expected function name");
                     return VMResult::RUNTIME_ERROR;
                 }
                 
-                std::string func_name = strings_.get_string(function_name.as.string_id);
+                std::string func_name = strings_.get_string(function_name.as_string_id());
                 std::string func_name_lc = func_name;
                 std::transform(func_name_lc.begin(), func_name_lc.end(), func_name_lc.begin(), [](unsigned char c){ return std::tolower(c); });
                 
@@ -628,12 +628,12 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
             
             case OpCode::OP_GET_GLOBAL: {
                 Value variable_name = read_constant(chunk, ip);
-                if (variable_name.type != ValueType::STRING_ID) {
+                if (variable_name.type() != ValueType::STRING_ID) {
                     runtime_error("Expected variable name");
                     return VMResult::RUNTIME_ERROR;
                 }
                 
-                std::string var_name = strings_.get_string(variable_name.as.string_id);
+                std::string var_name = strings_.get_string(variable_name.as_string_id());
                 Value value = get_global(var_name);
                 push(value);
                 break;
@@ -641,12 +641,12 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
             
             case OpCode::OP_SET_GLOBAL: {
                 Value variable_name = read_constant(chunk, ip);
-                if (variable_name.type != ValueType::STRING_ID) {
+                if (variable_name.type() != ValueType::STRING_ID) {
                     runtime_error("Expected variable name");
                     return VMResult::RUNTIME_ERROR;
                 }
                 
-                std::string var_name = strings_.get_string(variable_name.as.string_id);
+                std::string var_name = strings_.get_string(variable_name.as_string_id());
                 Value value = peek(); // Don't pop - assignment is an expression
                 set_global(var_name, value);
                 break;
@@ -683,34 +683,34 @@ bool VM::binary_op(OpCode op) {
     Value a = pop();
     
     // Handle string concatenation for addition
-    if (op == OpCode::OP_ADD && (a.type == ValueType::STRING_ID || b.type == ValueType::STRING_ID)) {
+    if (op == OpCode::OP_ADD && (a.type() == ValueType::STRING_ID || b.type() == ValueType::STRING_ID)) {
         std::string str_a, str_b;
         
         // Convert a to string
-        if (a.type == ValueType::STRING_ID) {
-            str_a = strings_.get_string(a.as.string_id);
-        } else if (a.type == ValueType::INT) {
-            str_a = std::to_string(a.as.integer);
-        } else if (a.type == ValueType::FLOAT) {
-            str_a = std::to_string(a.as.floating);
-        } else if (a.type == ValueType::BOOL) {
-            str_a = a.as.boolean ? "true" : "false";
-        } else if (a.type == ValueType::NIL) {
+        if (a.type() == ValueType::STRING_ID) {
+            str_a = strings_.get_string(a.as_string_id());
+        } else if (a.type() == ValueType::INT) {
+            str_a = std::to_string(a.as_integer());
+        } else if (a.type() == ValueType::FLOAT) {
+            str_a = std::to_string(a.as_floating());
+        } else if (a.type() == ValueType::BOOL) {
+            str_a = a.as_boolean() ? "true" : "false";
+        } else if (a.type() == ValueType::NIL) {
             str_a = "nil";
         } else {
             str_a = "unknown";
         }
         
         // Convert b to string
-        if (b.type == ValueType::STRING_ID) {
-            str_b = strings_.get_string(b.as.string_id);
-        } else if (b.type == ValueType::INT) {
-            str_b = std::to_string(b.as.integer);
-        } else if (b.type == ValueType::FLOAT) {
-            str_b = std::to_string(b.as.floating);
-        } else if (b.type == ValueType::BOOL) {
-            str_b = b.as.boolean ? "true" : "false";
-        } else if (b.type == ValueType::NIL) {
+        if (b.type() == ValueType::STRING_ID) {
+            str_b = strings_.get_string(b.as_string_id());
+        } else if (b.type() == ValueType::INT) {
+            str_b = std::to_string(b.as_integer());
+        } else if (b.type() == ValueType::FLOAT) {
+            str_b = std::to_string(b.as_floating());
+        } else if (b.type() == ValueType::BOOL) {
+            str_b = b.as_boolean() ? "true" : "false";
+        } else if (b.type() == ValueType::NIL) {
             str_b = "nil";
         } else {
             str_b = "unknown";
@@ -723,25 +723,25 @@ bool VM::binary_op(OpCode op) {
     }
     
     // Type checking (keep it simple for now)
-    if (a.type == ValueType::INT && b.type == ValueType::INT) {
+    if (a.type() == ValueType::INT && b.type() == ValueType::INT) {
         int64_t result;
         switch (op) {
-            case OpCode::OP_ADD: result = a.as.integer + b.as.integer; break;
-            case OpCode::OP_SUBTRACT: result = a.as.integer - b.as.integer; break;
-            case OpCode::OP_MULTIPLY: result = a.as.integer * b.as.integer; break;
+            case OpCode::OP_ADD: result = a.as_integer() + b.as_integer(); break;
+            case OpCode::OP_SUBTRACT: result = a.as_integer() - b.as_integer(); break;
+            case OpCode::OP_MULTIPLY: result = a.as_integer() * b.as_integer(); break;
             case OpCode::OP_DIVIDE: 
-                if (b.as.integer == 0) {
+                if (b.as_integer() == 0) {
                     runtime_error("Don't divide by zero.");
                     return false;
                 }
-                result = a.as.integer / b.as.integer; 
+                result = a.as_integer() / b.as_integer(); 
                 break;
             case OpCode::OP_MODULO:
-                if (b.as.integer == 0) {
+                if (b.as_integer() == 0) {
                     runtime_error("Don't modulo by zero.");
                     return false;
                 }
-                result = a.as.integer % b.as.integer; 
+                result = a.as_integer() % b.as_integer(); 
                 break;
             default:
                 runtime_error("Unknown binary operator");
@@ -751,9 +751,9 @@ bool VM::binary_op(OpCode op) {
         return true;
     }
     
-    if (a.type == ValueType::FLOAT || b.type == ValueType::FLOAT) {
-        double da = (a.type == ValueType::FLOAT) ? a.as.floating : static_cast<double>(a.as.integer);
-        double db = (b.type == ValueType::FLOAT) ? b.as.floating : static_cast<double>(b.as.integer);
+    if (a.type() == ValueType::FLOAT || b.type() == ValueType::FLOAT) {
+        double da = (a.type() == ValueType::FLOAT) ? a.as_floating() : static_cast<double>(a.as_integer());
+        double db = (b.type() == ValueType::FLOAT) ? b.as_floating() : static_cast<double>(b.as_integer());
         
         double result;
         switch (op) {
@@ -821,23 +821,23 @@ void VM::collect_garbage(const Chunk* active_chunk) {
 void VM::mark_reachable_strings(const Chunk* active_chunk) {
     // Mark strings on the VM stack
     for (Value* slot = stack_; slot < stack_top_; ++slot) {
-        if (slot->type == ValueType::STRING_ID) {
-            strings_.mark_string_reachable(slot->as.string_id);
+        if (slot->type() == ValueType::STRING_ID) {
+            strings_.mark_string_reachable(slot->as_string_id());
         }
     }
 
     // Mark globals
     for (const auto& pair : globals_) {
-        if (pair.second.type == ValueType::STRING_ID) {
-            strings_.mark_string_reachable(pair.second.as.string_id);
+        if (pair.second.type() == ValueType::STRING_ID) {
+            strings_.mark_string_reachable(pair.second.as_string_id());
         }
     }
 
     // Also mark any strings stored in the active chunk's constants (function names, string literals)
     if (active_chunk) {
         for (const auto& constant : active_chunk->constants()) {
-            if (constant.type == ValueType::STRING_ID) {
-                strings_.mark_string_reachable(constant.as.string_id);
+            if (constant.type() == ValueType::STRING_ID) {
+                strings_.mark_string_reachable(constant.as_string_id());
             }
         }
 
@@ -845,7 +845,7 @@ void VM::mark_reachable_strings(const Chunk* active_chunk) {
         for (size_t i = 0; i < active_chunk->function_count(); ++i) {
             const Chunk& f = active_chunk->get_function(i);
             for (const auto& c : f.constants()) {
-                if (c.type == ValueType::STRING_ID) strings_.mark_string_reachable(c.as.string_id);
+                if (c.type() == ValueType::STRING_ID) strings_.mark_string_reachable(c.as_string_id());
             }
         }
     }

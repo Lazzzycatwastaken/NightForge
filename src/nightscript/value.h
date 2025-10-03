@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <cstring>
 #include <vector>
 #include <string>
 #include <unordered_map>
@@ -63,7 +64,7 @@ enum class OpCode : uint8_t {
     OP_PRINT_SPACE,  // print with space separator
 };
 
-// Value types (POD union as specified)
+// Value types (classification)
 enum class ValueType : uint8_t {
     NIL,
     BOOL,
@@ -73,59 +74,107 @@ enum class ValueType : uint8_t {
     TABLE_ID,   // table reference
 };
 
+// NaN-boxed 64-bit value
+// Layout:
+//  - Non-qNaN bit patterns represent a 64-bit IEEE-754 double (FLOAT)
+//  - qNaN (0x7FF8...) space encodes other types
+//    Small immediates:
+//     - NIL   = QNAN | 0x1
+//     - FALSE = QNAN | 0x2
+//     - TRUE  = QNAN | 0x3
+//    Tagged payloads (48-bit payload in low bits):
+//     - INT       = QNAN | (TAG_INT    << 48) | sign-extended 48-bit integer
+//     - STRING_ID = QNAN | (TAG_STRING << 48) | uint32 payload (id)
+//     - TABLE_ID  = QNAN | (TAG_TABLE  << 48) | uint32 payload (id)
 struct Value {
-    ValueType type;
-    uint8_t padding[7]; // align to 8 bytes
-    union {
-        bool boolean;
-        int64_t integer;
-        double floating;
-        uint32_t string_id;
-        uint32_t table_id;
-    } as;
-    
-    Value() : type(ValueType::NIL) { as.integer = 0; }
-    
+private:
+    uint64_t bits_ = 0;
+
+    static constexpr uint64_t EXP_MASK   = 0x7FF0000000000000ULL;
+    static constexpr uint64_t QNAN_MASK  = 0x7FF8000000000000ULL;
+    static constexpr uint64_t QNAN       = 0x7FF8000000000000ULL; // canonical qNaN
+    static constexpr uint64_t PAYLOAD_MASK_48 = 0x0000FFFFFFFFFFFFULL; // 48-bit payload
+    static constexpr uint64_t SIGN_EXT_MASK_48 = 0xFFFF000000000000ULL; // for sign-ext
+    static constexpr int      TAG_SHIFT  = 48;
+    static constexpr uint64_t TAG_MASK   = 0x0007000000000000ULL; // 3 bits for tag
+
+    // Small immediates
+    static constexpr uint64_t TAG_NIL    = QNAN | 0x0000000000000001ULL;
+    static constexpr uint64_t TAG_FALSE  = QNAN | 0x0000000000000002ULL;
+    static constexpr uint64_t TAG_TRUE   = QNAN | 0x0000000000000003ULL;
+
+    // Tagged families
+    static constexpr uint64_t TAG_FAMILY_INT    = (0x1ULL << TAG_SHIFT);
+    static constexpr uint64_t TAG_FAMILY_STRING = (0x2ULL << TAG_SHIFT);
+    static constexpr uint64_t TAG_FAMILY_TABLE  = (0x3ULL << TAG_SHIFT);
+
+    static constexpr uint64_t MAKE_FAMILY(uint64_t family) { return QNAN | family; }
+
+    static bool is_qnan(uint64_t b) { return (b & QNAN_MASK) == QNAN; }
+
+public:
+    Value() : bits_(TAG_NIL) {}
+
+    // Factories
     static Value nil() {
-        Value v;
-        v.type = ValueType::NIL;
-        return v;
+        Value v; v.bits_ = TAG_NIL; return v;
     }
-    
     static Value boolean(bool b) {
-        Value v;
-        v.type = ValueType::BOOL;
-        v.as.boolean = b;
-        return v;
+        Value v; v.bits_ = b ? TAG_TRUE : TAG_FALSE; return v;
     }
-    
     static Value integer(int64_t i) {
-        Value v;
-        v.type = ValueType::INT;
-        v.as.integer = i;
-        return v;
+        // store as 48-bit signed integer payload
+        uint64_t payload = static_cast<uint64_t>(i) & PAYLOAD_MASK_48;
+        Value v; v.bits_ = MAKE_FAMILY(TAG_FAMILY_INT) | payload; return v;
     }
-    
     static Value floating(double f) {
-        Value v;
-        v.type = ValueType::FLOAT;
-        v.as.floating = f;
-        return v;
+        Value v; std::memcpy(&v.bits_, &f, sizeof(double)); return v;
     }
-    
     static Value string_id(uint32_t id) {
-        Value v;
-        v.type = ValueType::STRING_ID;
-        v.as.string_id = id;
-        return v;
+        Value v; v.bits_ = MAKE_FAMILY(TAG_FAMILY_STRING) | static_cast<uint64_t>(id); return v;
     }
-    
     static Value table_id(uint32_t id) {
-        Value v;
-        v.type = ValueType::TABLE_ID;
-        v.as.table_id = id;
-        return v;
+        Value v; v.bits_ = MAKE_FAMILY(TAG_FAMILY_TABLE) | static_cast<uint64_t>(id); return v;
     }
+
+    // Classification
+    ValueType type() const {
+        if (!is_qnan(bits_)) return ValueType::FLOAT; // normal numbers, +/-inf, sNaN treated as float
+        if (bits_ == TAG_NIL) return ValueType::NIL;
+        if (bits_ == TAG_TRUE || bits_ == TAG_FALSE) return ValueType::BOOL;
+        uint64_t tag = bits_ & TAG_MASK;
+        if (tag == TAG_FAMILY_INT) return ValueType::INT;
+        if (tag == TAG_FAMILY_STRING) return ValueType::STRING_ID;
+        if (tag == TAG_FAMILY_TABLE) return ValueType::TABLE_ID;
+        // Fallback treat as float (covers numeric qNaN payloads)
+        return ValueType::FLOAT;
+    }
+
+    // Predicates
+    bool is_nil() const { return bits_ == TAG_NIL; }
+    bool is_bool() const { return bits_ == TAG_TRUE || bits_ == TAG_FALSE; }
+    bool is_true() const { return bits_ == TAG_TRUE; }
+    bool is_false() const { return bits_ == TAG_FALSE; }
+    bool is_int() const { return is_qnan(bits_) && ((bits_ & TAG_MASK) == TAG_FAMILY_INT); }
+    bool is_float() const { return !is_qnan(bits_); }
+    bool is_string_id() const { return is_qnan(bits_) && ((bits_ & TAG_MASK) == TAG_FAMILY_STRING); }
+    bool is_table_id() const { return is_qnan(bits_) && ((bits_ & TAG_MASK) == TAG_FAMILY_TABLE); }
+
+    // Accessors (caller must ensure the type matches)
+    bool as_boolean() const { return bits_ == TAG_TRUE; }
+    int64_t as_integer() const {
+        uint64_t payload = bits_ & PAYLOAD_MASK_48;
+        // sign-extend 48-bit value to 64-bit
+        if (payload & (1ULL << 47)) {
+            payload |= SIGN_EXT_MASK_48;
+        }
+        return static_cast<int64_t>(payload);
+    }
+    double as_floating() const {
+        double d; std::memcpy(&d, &bits_, sizeof(double)); return d;
+    }
+    uint32_t as_string_id() const { return static_cast<uint32_t>(bits_ & 0xFFFFFFFFULL); }
+    uint32_t as_table_id() const { return static_cast<uint32_t>(bits_ & 0xFFFFFFFFULL); }
 };
 
 // Bytecode chunk (contains instructions + constants)
