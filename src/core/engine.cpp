@@ -379,17 +379,7 @@ void Engine::setup_host_functions() {
         // Set as global in VM for now - in full game this would go to save state
         vm_->set_global(var_name, args[1]);
         
-        std::cout << "[SET_VAR] " << var_name << " = ";
-        switch (args[1].type()) {
-            case ValueType::NIL: std::cout << "nil"; break;
-            case ValueType::BOOL: std::cout << (args[1].as_boolean() ? "true" : "false"); break;
-            case ValueType::INT: std::cout << args[1].as_integer(); break;
-            case ValueType::FLOAT: std::cout << args[1].as_floating(); break;
-            case ValueType::STRING_ID: std::cout << "\"" << vm_->strings().get_string(args[1].as_string_id()) << "\""; break;
-            case ValueType::TABLE_ID: std::cout << "<table>"; break;
-            default: std::cout << "<unknown>"; break;
-        }
-        std::cout << std::endl;
+        // std::cout << "[SET_VAR] " << var_name << " = ..." << std::endl;
         
         return Value::nil();
     });
@@ -401,11 +391,10 @@ void Engine::setup_host_functions() {
             return Value::nil();
         }
         
-        std::string var_name = vm_->strings().get_string(args[0].as_string_id());
-        Value result = vm_->get_global(var_name);
-        
-        std::cout << "[GET_VAR] " << var_name << std::endl;
-        return result;
+    std::string var_name = vm_->strings().get_string(args[0].as_string_id());
+    Value result = vm_->get_global(var_name);
+    // std::cout << "[GET_VAR] " << var_name << std::endl;
+    return result;
     });
     
     // save_state(string) - save game state to file
@@ -482,6 +471,122 @@ void Engine::setup_host_functions() {
         }
 
         uint32_t id = vm_->strings().intern(line);
+        return Value::string_id(id);
+    });
+
+    // Buffer API buffer([initial_string]) -> buffer
+    vm_->register_host_function("buffer", [this](const std::vector<Value>& args) -> Value {
+        using namespace nightscript;
+        if (args.size() == 0) {
+            uint32_t id = vm_->buffers().create_from_two(std::string(), std::string());
+            return Value::buffer_id(id);
+        }
+        if (args[0].type() == ValueType::STRING_ID) {
+            std::string s = vm_->strings().get_string(args[0].as_string_id());
+            uint32_t id = vm_->buffers().create_from_two(s, std::string());
+            return Value::buffer_id(id);
+        }
+        // else convert other types to string
+        std::string s;
+        if (args[0].type() == ValueType::INT) s = std::to_string(args[0].as_integer());
+        else if (args[0].type() == ValueType::FLOAT) s = std::to_string(args[0].as_floating());
+        else if (args[0].type() == ValueType::BOOL) s = args[0].as_boolean() ? "true" : "false";
+        else s = "";
+    uint32_t id = vm_->buffers().create_from_two(s, std::string());
+    return Value::buffer_id(id);
+    });
+
+    // buffer_append(buffer, value)
+    vm_->register_host_function("buffer_append", [this](const std::vector<Value>& args) -> Value {
+        using namespace nightscript;
+        if (args.size() != 2) {
+            std::cerr << "buffer_append: expected (buffer, value)" << std::endl;
+            return Value::nil();
+        }
+
+        uint32_t buf = 0;
+        // If first arg is already a buffer use it otherwise new buffer
+        if (args[0].type() == ValueType::STRING_BUFFER) {
+            buf = args[0].as_buffer_id();
+        } else if (args[0].type() == ValueType::STRING_ID) {
+            std::string s = vm_->strings().get_string(args[0].as_string_id());
+            buf = vm_->buffers().create_from_two(s, std::string());
+        } else if (args[0].type() == ValueType::INT) {
+            std::string s = std::to_string(args[0].as_integer());
+            buf = vm_->buffers().create_from_two(s, std::string());
+        } else if (args[0].type() == ValueType::FLOAT) {
+            std::string s = std::to_string(args[0].as_floating());
+            buf = vm_->buffers().create_from_two(s, std::string());
+        } else if (args[0].type() == ValueType::BOOL) {
+            std::string s = args[0].as_boolean() ? "true" : "false";
+            buf = vm_->buffers().create_from_two(s, std::string());
+        } else if (args[0].type() == ValueType::NIL) {
+            buf = vm_->buffers().create_from_two(std::string("nil"), std::string());
+        } else {
+            std::cerr << "buffer_append: first arg not coercible to buffer" << std::endl;
+            return Value::nil();
+        }
+
+        const Value& v = args[1];
+        if (v.type() == ValueType::STRING_ID) {
+            vm_->buffers().append_id(buf, v.as_string_id(), vm_->strings());
+        } else if (v.type() == ValueType::STRING_BUFFER) {
+            vm_->buffers().append_literal(buf, vm_->buffers().get_buffer(v.as_buffer_id()));
+        } else if (v.type() == ValueType::INT) {
+            vm_->buffers().append_literal(buf, std::to_string(v.as_integer()));
+        } else if (v.type() == ValueType::FLOAT) {
+            vm_->buffers().append_literal(buf, std::to_string(v.as_floating()));
+        } else if (v.type() == ValueType::BOOL) {
+            vm_->buffers().append_literal(buf, v.as_boolean() ? "true" : "false");
+        } else if (v.type() == ValueType::NIL) {
+            vm_->buffers().append_literal(buf, "nil");
+        } else {
+            vm_->buffers().append_literal(buf, "unknown");
+        }
+
+        return Value::buffer_id(buf);
+    });
+
+    // buffer_reserve(buffer, capacity)
+    vm_->register_host_function("buffer_reserve", [this](const std::vector<Value>& args) -> Value {
+        using namespace nightscript;
+        if (args.size() != 2 || args[0].type() != ValueType::STRING_BUFFER || args[1].type() != ValueType::INT) {
+            std::cerr << "buffer_reserve: expected (buffer, int)" << std::endl;
+            return Value::nil();
+        }
+    vm_->buffers().reserve(args[0].as_buffer_id(), static_cast<size_t>(args[1].as_integer()));
+        return args[0];
+    });
+
+    // buffer_flatten(buffer) -> string_id
+    vm_->register_host_function("buffer_flatten", [this](const std::vector<Value>& args) -> Value {
+        using namespace nightscript;
+        if (args.size() != 1 || args[0].type() != ValueType::STRING_BUFFER) {
+            std::cerr << "buffer_flatten: expected (buffer)" << std::endl;
+            return Value::nil();
+        }
+        uint32_t buf = args[0].as_buffer_id();
+        uint32_t sid = vm_->strings().intern(vm_->buffers().get_buffer(buf));
+        return Value::string_id(sid);
+    });
+
+    // type(value) -> string ("nil","bool","int","float","string","buffer","table")
+    vm_->register_host_function("type", [this](const std::vector<Value>& args) -> Value {
+        using namespace nightscript;
+        if (args.size() != 1) return Value::nil();
+        const Value& v0 = args[0];
+        std::string s;
+        switch (v0.type()) {
+            case ValueType::NIL: s = "nil"; break;
+            case ValueType::BOOL: s = "bool"; break;
+            case ValueType::INT: s = "int"; break;
+            case ValueType::FLOAT: s = "float"; break;
+            case ValueType::STRING_ID: s = "string"; break;
+            case ValueType::STRING_BUFFER: s = "buffer"; break;
+            case ValueType::TABLE_ID: s = "table"; break;
+            default: s = "unknown"; break;
+        }
+        uint32_t id = vm_->strings().intern(s);
         return Value::string_id(id);
     });
 

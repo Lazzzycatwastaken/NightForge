@@ -70,6 +70,7 @@ enum class ValueType : uint8_t {
     BOOL,
     INT,
     FLOAT,
+    STRING_BUFFER, // mutable string builder buffer
     STRING_ID,  // interned string ID
     TABLE_ID,   // table reference
 };
@@ -107,6 +108,7 @@ private:
     static constexpr uint64_t TAG_FAMILY_INT    = (0x1ULL << TAG_SHIFT);
     static constexpr uint64_t TAG_FAMILY_STRING = (0x2ULL << TAG_SHIFT);
     static constexpr uint64_t TAG_FAMILY_TABLE  = (0x3ULL << TAG_SHIFT);
+    static constexpr uint64_t TAG_FAMILY_BUFFER = (0x4ULL << TAG_SHIFT);
 
     static constexpr uint64_t MAKE_FAMILY(uint64_t family) { return QNAN | family; }
 
@@ -133,6 +135,9 @@ public:
     static Value string_id(uint32_t id) {
         Value v; v.bits_ = MAKE_FAMILY(TAG_FAMILY_STRING) | static_cast<uint64_t>(id); return v;
     }
+    static Value buffer_id(uint32_t id) {
+        Value v; v.bits_ = MAKE_FAMILY(TAG_FAMILY_BUFFER) | static_cast<uint64_t>(id); return v;
+    }
     static Value table_id(uint32_t id) {
         Value v; v.bits_ = MAKE_FAMILY(TAG_FAMILY_TABLE) | static_cast<uint64_t>(id); return v;
     }
@@ -144,6 +149,7 @@ public:
         if (bits_ == TAG_TRUE || bits_ == TAG_FALSE) return ValueType::BOOL;
         uint64_t tag = bits_ & TAG_MASK;
         if (tag == TAG_FAMILY_INT) return ValueType::INT;
+    if (tag == TAG_FAMILY_BUFFER) return ValueType::STRING_BUFFER;
         if (tag == TAG_FAMILY_STRING) return ValueType::STRING_ID;
         if (tag == TAG_FAMILY_TABLE) return ValueType::TABLE_ID;
         // Fallback treat as float (covers numeric qNaN payloads)
@@ -158,6 +164,7 @@ public:
     bool is_int() const { return is_qnan(bits_) && ((bits_ & TAG_MASK) == TAG_FAMILY_INT); }
     bool is_float() const { return !is_qnan(bits_); }
     bool is_string_id() const { return is_qnan(bits_) && ((bits_ & TAG_MASK) == TAG_FAMILY_STRING); }
+    bool is_buffer_id() const { return is_qnan(bits_) && ((bits_ & TAG_MASK) == TAG_FAMILY_BUFFER); }
     bool is_table_id() const { return is_qnan(bits_) && ((bits_ & TAG_MASK) == TAG_FAMILY_TABLE); }
 
     // Accessors (caller must ensure the type matches)
@@ -174,6 +181,7 @@ public:
         double d; std::memcpy(&d, &bits_, sizeof(double)); return d;
     }
     uint32_t as_string_id() const { return static_cast<uint32_t>(bits_ & 0xFFFFFFFFULL); }
+    uint32_t as_buffer_id() const { return static_cast<uint32_t>(bits_ & 0xFFFFFFFFULL); }
     uint32_t as_table_id() const { return static_cast<uint32_t>(bits_ & 0xFFFFFFFFULL); }
 };
 
@@ -229,6 +237,9 @@ public:
     // String concatenation optimization
     uint32_t concat_strings(uint32_t id1, uint32_t id2);
     uint32_t concat_string_literal(uint32_t id, const std::string& literal);
+    uint32_t append_to_interned(uint32_t left_id, const std::string& suffix);
+    // Append from another string id
+    uint32_t append_id_to_interned(uint32_t left_id, uint32_t right_id);
     
 private:
     struct StringEntry {
@@ -240,6 +251,36 @@ private:
     std::vector<StringEntry> strings_;
     std::unordered_map<std::string, uint32_t> string_to_id_;
     std::vector<uint32_t> free_slots_; // for reusing deleted string slots
+};
+
+// Mutable string buffer table (string builders)
+class BufferTable {
+public:
+    uint32_t create_from_two(const std::string& a, const std::string& b);
+    uint32_t create_from_ids(uint32_t left_id, uint32_t right_id, const StringTable& strings);
+    const std::string& get_buffer(uint32_t id) const;
+    uint32_t append_literal(uint32_t id, const std::string& suffix);
+    uint32_t append_id(uint32_t left_id, uint32_t right_id, const StringTable& strings);
+
+    // Reserve capacity for a buffer
+    void reserve(uint32_t id, size_t capacity);
+
+    // GC support
+    void mark_buffer_reachable(uint32_t id);
+    void sweep_unreachable_buffers();
+    void clear_gc_marks();
+
+    size_t memory_usage() const;
+
+private:
+    struct BufferEntry {
+        std::string str;
+        bool gc_marked = false;
+        size_t ref_count = 0;
+    };
+
+    std::vector<BufferEntry> buffers_;
+    std::vector<uint32_t> free_slots_;
 };
 
 } // namespace nightscript

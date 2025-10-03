@@ -4,6 +4,7 @@
 #include <cstring>
 #include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <chrono>
 
 #ifdef DEBUG_TRACE_EXECUTION
@@ -15,6 +16,7 @@ namespace nightscript {
 
 VM::VM() {
     reset_stack();
+    tmp_args_.reserve(16);
 }
 
 VM::~VM() {
@@ -30,7 +32,9 @@ VMResult VM::execute(const Chunk& chunk, const Chunk* parent_chunk) {
 }
 
 void VM::register_host_function(const std::string& name, HostFunction func) {
-    host_functions_[name] = func;
+    std::string key = name;
+    std::transform(key.begin(), key.end(), key.begin(), [](unsigned char c){ return std::tolower(c); });
+    host_functions_[key] = func;
 }
 
 void VM::set_global(const std::string& name, const Value& value) {
@@ -178,9 +182,14 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
                 if (a.type() == ValueType::STRING_ID) {
                     str_a = strings_.get_string(a.as_string_id());
                 } else if (a.type() == ValueType::INT) {
-                    str_a = std::to_string(a.as_integer());
+                    char buf[32];
+                    auto res = std::to_chars(buf, buf + sizeof(buf), a.as_integer());
+                    str_a.assign(buf, res.ptr);
                 } else if (a.type() == ValueType::FLOAT) {
-                    str_a = std::to_string(a.as_floating());
+                    // fall back to snprintf for floating formatting
+                    char buf[64];
+                    int n = snprintf(buf, sizeof(buf), "%g", a.as_floating());
+                    if (n > 0) str_a.assign(buf, static_cast<size_t>(n));
                 } else if (a.type() == ValueType::BOOL) {
                     str_a = a.as_boolean() ? "true" : "false";
                 } else if (a.type() == ValueType::NIL) {
@@ -193,9 +202,13 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
                 if (b.type() == ValueType::STRING_ID) {
                     str_b = strings_.get_string(b.as_string_id());
                 } else if (b.type() == ValueType::INT) {
-                    str_b = std::to_string(b.as_integer());
+                    char buf[32];
+                    auto res = std::to_chars(buf, buf + sizeof(buf), b.as_integer());
+                    str_b.assign(buf, res.ptr);
                 } else if (b.type() == ValueType::FLOAT) {
-                    str_b = std::to_string(b.as_floating());
+                    char buf[64];
+                    int n = snprintf(buf, sizeof(buf), "%g", b.as_floating());
+                    if (n > 0) str_b.assign(buf, static_cast<size_t>(n));
                 } else if (b.type() == ValueType::BOOL) {
                     str_b = b.as_boolean() ? "true" : "false";
                 } else if (b.type() == ValueType::NIL) {
@@ -204,13 +217,50 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
                     str_b = "unknown";
                 }
                 
-                // Concatenate and intern the result
-                std::string result = str_a + str_b;
-                uint32_t result_id = strings_.intern(result);
-                push(Value::string_id(result_id));
-                
-                // Trigger GC if we're using too much memory
-                bytes_allocated_since_gc_ += result.length();
+                // Prefer buffers
+                if (a.type() == ValueType::STRING_BUFFER) {
+                    uint32_t buf_id = a.as_buffer_id();
+                    if (b.type() == ValueType::STRING_BUFFER) {
+                        buffers_.append_id(buf_id, b.as_buffer_id(), strings_);
+                    } else if (b.type() == ValueType::STRING_ID) {
+                        buffers_.append_id(buf_id, b.as_string_id(), strings_);
+                    } else {
+                        buffers_.append_literal(buf_id, str_b);
+                    }
+                    push(Value::buffer_id(buf_id));
+                } else if (b.type() == ValueType::STRING_BUFFER) {
+                    uint32_t buf_id = b.as_buffer_id();
+                    if (a.type() == ValueType::STRING_ID) {
+                        uint32_t new_buf = buffers_.create_from_ids(a.as_string_id(), buf_id, strings_);
+                        push(Value::buffer_id(new_buf));
+                    } else {
+                        uint32_t new_buf = buffers_.create_from_two(str_a, buffers_.get_buffer(buf_id));
+                        push(Value::buffer_id(new_buf));
+                    }
+                } else if (a.type() == ValueType::STRING_ID) {
+                    uint32_t left_id = a.as_string_id();
+                    uint32_t new_id = left_id;
+                    if (b.type() == ValueType::STRING_ID) {
+                        new_id = strings_.append_id_to_interned(left_id, b.as_string_id());
+                    } else {
+                        new_id = strings_.append_to_interned(left_id, str_b);
+                    }
+                    if (new_id == left_id) {
+                        push(Value::string_id(new_id));
+                    } else {
+                        uint32_t buf = buffers_.create_from_ids(left_id, (b.type() == ValueType::STRING_ID) ? b.as_string_id() : 0, strings_);
+                        if (b.type() != ValueType::STRING_ID) {
+                            buffers_.append_literal(buf, str_b);
+                        }
+                        push(Value::buffer_id(buf));
+                        bytes_allocated_since_gc_ += buffers_.get_buffer(buf).length();
+                    }
+                } else {
+                    uint32_t buf = buffers_.create_from_two(str_a, str_b);
+                    push(Value::buffer_id(buf));
+                    bytes_allocated_since_gc_ += buffers_.get_buffer(buf).length();
+                }
+
                 if (bytes_allocated_since_gc_ > GC_THRESHOLD) {
                     collect_garbage(&chunk);
                 }
@@ -389,6 +439,9 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
             
             case OpCode::OP_PRINT: {
                 Value value = pop();
+                if (value.type() == ValueType::STRING_BUFFER) {
+                    std::cout << buffers_.get_buffer(value.as_buffer_id());
+                } else {
                 switch (value.type()) {
                     case ValueType::NIL: std::cout << "nil"; break;
                     case ValueType::BOOL: std::cout << (value.as_boolean() ? "true" : "false"); break;
@@ -399,12 +452,16 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
                         break;
                     default: std::cout << "unknown"; break;
                 }
+                }
                 std::cout << std::endl;
                 break;
             }
             
             case OpCode::OP_PRINT_SPACE: {
                 Value value = pop();
+                if (value.type() == ValueType::STRING_BUFFER) {
+                    std::cout << buffers_.get_buffer(value.as_buffer_id());
+                } else {
                 switch (value.type()) {
                     case ValueType::NIL: std::cout << "nil"; break;
                     case ValueType::BOOL: std::cout << (value.as_boolean() ? "true" : "false"); break;
@@ -414,6 +471,7 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
                         std::cout << strings_.get_string(value.as_string_id()); 
                         break;
                     default: std::cout << "unknown"; break;
+                }
                 }
                 std::cout << " ";  // space instead of newline
                 break;
@@ -434,15 +492,17 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
                 std::transform(func_name_lc.begin(), func_name_lc.end(), func_name_lc.begin(), [](unsigned char c){ return std::tolower(c); });
                 auto it = host_functions_.find(func_name_lc);
 
-                // Collect arguments from stack
-                std::vector<Value> args;
-                for (int i = 0; i < arg_count; ++i) {
-                    args.insert(args.begin(), pop()); // reverse order
+                tmp_args_.clear();
+                if (arg_count > 0) {
+                    tmp_args_.resize(arg_count);
+                    for (int i = arg_count - 1; i >= 0; --i) {
+                        tmp_args_[i] = pop();
+                        if (i == 0) break;
+                    }
                 }
 
                 if (it != host_functions_.end()) {
-                    // Call host function
-                    Value result = it->second(args);
+                    Value result = it->second(tmp_args_);
                     push(result);
                     break;
                 }
@@ -473,8 +533,8 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
                         }
                         
                         // Set parameter value
-                        if (i < args.size()) {
-                            set_global(param_name, args[i]);
+                if (i < tmp_args_.size()) {
+                    set_global(param_name, tmp_args_[i]);
                         } else {
                             set_global(param_name, Value::nil());
                         }
@@ -502,6 +562,10 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
                     }
                     
                     Value return_value = pop();
+                    if (return_value.type() == ValueType::STRING_BUFFER) {
+                        uint32_t sid = strings_.intern(buffers_.get_buffer(return_value.as_buffer_id()));
+                        return_value = Value::string_id(sid);
+                    }
                     stack_top_ = saved_stack_top;
                     push(return_value);
                     break;
@@ -531,8 +595,8 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
                                 had_saved_params.push_back(false);
                             }
                             
-                            if (i < args.size()) {
-                                set_global(param_name, args[i]);
+                            if (i < tmp_args_.size()) {
+                                set_global(param_name, tmp_args_[i]);
                             } else {
                                 set_global(param_name, Value::nil());
                             }
@@ -561,6 +625,10 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
                         }
 
                         Value return_value = pop();
+                        if (return_value.type() == ValueType::STRING_BUFFER) {
+                            uint32_t sid = strings_.intern(buffers_.get_buffer(return_value.as_buffer_id()));
+                            return_value = Value::string_id(sid);
+                        }
                         stack_top_ = saved_stack_top;
                         push(return_value);
                         break;
@@ -591,9 +659,13 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
                 std::string func_name_lc = func_name;
                 std::transform(func_name_lc.begin(), func_name_lc.end(), func_name_lc.begin(), [](unsigned char c){ return std::tolower(c); });
                 
-                std::vector<Value> args;
-                for (int i = 0; i < arg_count; ++i) {
-                    args.insert(args.begin(), pop());
+                tmp_args_.clear();
+                if (arg_count > 0) {
+                    tmp_args_.resize(arg_count);
+                    for (int i = arg_count - 1; i >= 0; --i) {
+                        tmp_args_[i] = pop();
+                        if (i == 0) break;
+                    }
                 }
                 
                 ssize_t func_index = chunk.get_function_index(func_name_lc);
@@ -602,8 +674,8 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
                     
                     for (size_t i = 0; i < param_names.size(); ++i) {
                         const std::string& param_name = param_names[i];
-                        if (i < args.size()) {
-                            set_global(param_name, args[i]);
+                        if (i < tmp_args_.size()) {
+                        set_global(param_name, tmp_args_[i]);
                         } else {
                             set_global(param_name, Value::nil());
                         }
@@ -617,7 +689,7 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
                 
                 auto it = host_functions_.find(func_name_lc);
                 if (it != host_functions_.end()) {
-                    Value result = it->second(args);
+                    Value result = it->second(tmp_args_);
                     push(result);
                 } else {
                     runtime_error("Unknown function in tail call: %s", func_name.c_str());
@@ -690,9 +762,13 @@ bool VM::binary_op(OpCode op) {
         if (a.type() == ValueType::STRING_ID) {
             str_a = strings_.get_string(a.as_string_id());
         } else if (a.type() == ValueType::INT) {
-            str_a = std::to_string(a.as_integer());
+            char buf[32];
+            auto res = std::to_chars(buf, buf + sizeof(buf), a.as_integer());
+            str_a.assign(buf, res.ptr);
         } else if (a.type() == ValueType::FLOAT) {
-            str_a = std::to_string(a.as_floating());
+            char buf[64];
+            int n = snprintf(buf, sizeof(buf), "%g", a.as_floating());
+            if (n > 0) str_a.assign(buf, static_cast<size_t>(n));
         } else if (a.type() == ValueType::BOOL) {
             str_a = a.as_boolean() ? "true" : "false";
         } else if (a.type() == ValueType::NIL) {
@@ -705,9 +781,13 @@ bool VM::binary_op(OpCode op) {
         if (b.type() == ValueType::STRING_ID) {
             str_b = strings_.get_string(b.as_string_id());
         } else if (b.type() == ValueType::INT) {
-            str_b = std::to_string(b.as_integer());
+            char buf[32];
+            auto res = std::to_chars(buf, buf + sizeof(buf), b.as_integer());
+            str_b.assign(buf, res.ptr);
         } else if (b.type() == ValueType::FLOAT) {
-            str_b = std::to_string(b.as_floating());
+            char buf[64];
+            int n = snprintf(buf, sizeof(buf), "%g", b.as_floating());
+            if (n > 0) str_b.assign(buf, static_cast<size_t>(n));
         } else if (b.type() == ValueType::BOOL) {
             str_b = b.as_boolean() ? "true" : "false";
         } else if (b.type() == ValueType::NIL) {
@@ -716,9 +796,9 @@ bool VM::binary_op(OpCode op) {
             str_b = "unknown";
         }
         
-        std::string result = str_a + str_b;
-        uint32_t result_id = strings_.intern(result);
-        push(Value::string_id(result_id));
+                    uint32_t buf = buffers_.create_from_two(str_a, str_b);
+                    push(Value::buffer_id(buf));
+                    bytes_allocated_since_gc_ += buffers_.get_buffer(buf).length();
         return true;
     }
     
@@ -794,6 +874,7 @@ void VM::collect_garbage(const Chunk* active_chunk) {
     
     // Clear all GC marks
     strings_.clear_gc_marks();
+    buffers_.clear_gc_marks();
     
     // Mark all reachable strings
     mark_reachable_strings(active_chunk);
@@ -802,10 +883,16 @@ void VM::collect_garbage(const Chunk* active_chunk) {
     size_t old_memory = strings_.memory_usage();
     strings_.sweep_unreachable_strings();
     size_t new_memory = strings_.memory_usage();
+
+    // Sweep buffers
+    size_t old_buf_mem = buffers_.memory_usage();
+    buffers_.sweep_unreachable_buffers();
+    size_t new_buf_mem = buffers_.memory_usage();
     
     // Update stats
     stats.gc_collections++;
     stats.bytes_freed += (old_memory - new_memory);
+    stats.bytes_freed += (old_buf_mem - new_buf_mem);
     bytes_allocated_since_gc_ = 0;
     
     auto end_time = std::chrono::high_resolution_clock::now();
@@ -823,6 +910,8 @@ void VM::mark_reachable_strings(const Chunk* active_chunk) {
     for (Value* slot = stack_; slot < stack_top_; ++slot) {
         if (slot->type() == ValueType::STRING_ID) {
             strings_.mark_string_reachable(slot->as_string_id());
+        } else if (slot->type() == ValueType::STRING_BUFFER) {
+            buffers_.mark_buffer_reachable(slot->as_buffer_id());
         }
     }
 
@@ -830,6 +919,8 @@ void VM::mark_reachable_strings(const Chunk* active_chunk) {
     for (const auto& pair : globals_) {
         if (pair.second.type() == ValueType::STRING_ID) {
             strings_.mark_string_reachable(pair.second.as_string_id());
+        } else if (pair.second.type() == ValueType::STRING_BUFFER) {
+            buffers_.mark_buffer_reachable(pair.second.as_buffer_id());
         }
     }
 

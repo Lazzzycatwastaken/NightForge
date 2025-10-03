@@ -2,6 +2,8 @@
 #include "value.h"
 #include <functional>
 #include <memory>
+#include <unordered_map>
+#include <vector>
 
 namespace nightforge {
 namespace nightscript {
@@ -28,8 +30,9 @@ public:
     // Register host functions
     void register_host_function(const std::string& name, HostFunction func);
     
-    // String management
+    // String and buffer management
     StringTable& strings() { return strings_; }
+    BufferTable& buffers() { return buffers_; }
     
     // Garbage collection
     void collect_garbage(const Chunk* active_chunk = nullptr);
@@ -60,6 +63,7 @@ private:
     std::unordered_map<std::string, Value> globals_;
     std::unordered_map<std::string, HostFunction> host_functions_;
     StringTable strings_;
+    BufferTable buffers_;
     
     // Bytecode cache
     struct BytecodeCache {
@@ -69,7 +73,10 @@ private:
     
     // GC state
     std::vector<uint32_t> reachable_strings_;
+    std::vector<uint32_t> reachable_buffers_;
     size_t bytes_allocated_since_gc_ = 0;
+    
+    std::vector<Value> tmp_args_;
     
     // Stack operations
     void push(const Value& value);

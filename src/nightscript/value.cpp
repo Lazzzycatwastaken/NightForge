@@ -152,5 +152,95 @@ uint32_t StringTable::concat_string_literal(uint32_t id, const std::string& lite
     return intern(str + literal);
 }
 
+uint32_t StringTable::append_to_interned(uint32_t left_id, const std::string& suffix) {
+    if (left_id >= strings_.size()) return concat_string_literal(left_id, suffix);
+
+    auto &entry = strings_[left_id];
+    if (entry.ref_count != 1) {
+        return concat_string_literal(left_id, suffix);
+    }
+
+    string_to_id_.erase(entry.str);
+
+    entry.str.reserve(entry.str.size() + suffix.size());
+    entry.str.append(suffix);
+
+    string_to_id_[entry.str] = left_id;
+    return left_id;
+}
+
+uint32_t StringTable::append_id_to_interned(uint32_t left_id, uint32_t right_id) {
+    if (right_id >= strings_.size()) return left_id;
+    const std::string& rhs = get_string(right_id);
+    return append_to_interned(left_id, rhs);
+}
+
+// BufferTable implementation
+uint32_t BufferTable::create_from_two(const std::string& a, const std::string& b) {
+    uint32_t id;
+    if (!free_slots_.empty()) {
+        id = free_slots_.back(); free_slots_.pop_back();
+        buffers_[id] = {a + b, false, 1};
+    } else {
+        id = static_cast<uint32_t>(buffers_.size());
+        buffers_.push_back({a + b, false, 1});
+    }
+    return id;
+}
+
+uint32_t BufferTable::create_from_ids(uint32_t left_id, uint32_t right_id, const StringTable& strings) {
+    std::string a = (left_id < strings.string_count()) ? strings.get_string(left_id) : std::string();
+    std::string b = (right_id < strings.string_count()) ? strings.get_string(right_id) : std::string();
+    return create_from_two(a, b);
+}
+
+const std::string& BufferTable::get_buffer(uint32_t id) const {
+    static const std::string empty = "";
+    if (id >= buffers_.size()) return empty;
+    return buffers_[id].str;
+}
+
+uint32_t BufferTable::append_literal(uint32_t id, const std::string& suffix) {
+    if (id >= buffers_.size()) return id;
+    auto &entry = buffers_[id];
+    entry.str.append(suffix);
+    return id;
+}
+
+uint32_t BufferTable::append_id(uint32_t left_id, uint32_t right_id, const StringTable& strings) {
+    if (right_id >= strings.string_count()) return left_id;
+    const std::string& rhs = strings.get_string(right_id);
+    return append_literal(left_id, rhs);
+}
+
+void BufferTable::reserve(uint32_t id, size_t capacity) {
+    if (id >= buffers_.size()) return;
+    buffers_[id].str.reserve(capacity);
+}
+
+void BufferTable::mark_buffer_reachable(uint32_t id) {
+    if (id < buffers_.size()) buffers_[id].gc_marked = true;
+}
+
+void BufferTable::sweep_unreachable_buffers() {
+    for (uint32_t i = 0; i < buffers_.size(); ++i) {
+        if (!buffers_[i].gc_marked && !buffers_[i].str.empty()) {
+            buffers_[i].str.clear();
+            buffers_[i].ref_count = 0;
+            free_slots_.push_back(i);
+        }
+    }
+}
+
+void BufferTable::clear_gc_marks() {
+    for (auto &b : buffers_) b.gc_marked = false;
+}
+
+size_t BufferTable::memory_usage() const {
+    size_t total = 0;
+    for (const auto &b : buffers_) total += b.str.capacity();
+    return total;
+}
+
 } // namespace nightscript
 } // namespace nightforge
