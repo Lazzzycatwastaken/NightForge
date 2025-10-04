@@ -8,6 +8,8 @@
 namespace nightforge {
 namespace nightscript {
 
+class HostEnvironment; // forward declare
+
 // Host function signature
 using HostFunction = std::function<Value(const std::vector<Value>&)>;
 
@@ -20,15 +22,15 @@ enum class VMResult {
 
 class VM {
 public:
-    VM();
+    VM(HostEnvironment* host_env = nullptr);
     ~VM();
     
     // Execute bytecode chunk
     VMResult execute(const Chunk& chunk);
     VMResult execute(const Chunk& chunk, const Chunk* parent_chunk);
     
-    // Register host functions
-    void register_host_function(const std::string& name, HostFunction func);
+    // Assign a host environment
+    void set_host_environment(HostEnvironment* env) { host_env_ = env; }
     
     // String and buffer management
     StringTable& strings() { return strings_; }
@@ -61,7 +63,7 @@ private:
     Value* stack_top_;
     
     std::unordered_map<std::string, Value> globals_;
-    std::unordered_map<std::string, HostFunction> host_functions_;
+    // host functions are provided via HostEnvironment (host_env_)
     StringTable strings_;
     BufferTable buffers_;
     
@@ -77,6 +79,7 @@ private:
     size_t bytes_allocated_since_gc_ = 0;
     
     std::vector<Value> tmp_args_;
+    HostEnvironment* host_env_ = nullptr;
     
     // Stack operations
     void push(const Value& value);

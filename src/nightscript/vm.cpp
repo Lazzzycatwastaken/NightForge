@@ -1,4 +1,5 @@
 #include "vm.h"
+#include "host_api.h"
 #include <iostream>
 #include <cstdarg>
 #include <cstring>
@@ -14,7 +15,8 @@
 namespace nightforge {
 namespace nightscript {
 
-VM::VM() {
+VM::VM(HostEnvironment* host_env) {
+    host_env_ = host_env;
     reset_stack();
     tmp_args_.reserve(16);
 }
@@ -31,11 +33,7 @@ VMResult VM::execute(const Chunk& chunk, const Chunk* parent_chunk) {
     return run(chunk, parent_chunk);
 }
 
-void VM::register_host_function(const std::string& name, HostFunction func) {
-    std::string key = name;
-    std::transform(key.begin(), key.end(), key.begin(), [](unsigned char c){ return std::tolower(c); });
-    host_functions_[key] = func;
-}
+// Note: host functions are provided by HostEnvironment VM no longer stores them internally
 
 void VM::set_global(const std::string& name, const Value& value) {
     globals_[name] = value;
@@ -480,17 +478,16 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
             case OpCode::OP_CALL_HOST: {
                 Value function_name = read_constant(chunk, ip);
                 uint8_t arg_count = read_byte(ip);
-                
+
                 if (function_name.type() != ValueType::STRING_ID) {
                     runtime_error("Expected function name");
                     return VMResult::RUNTIME_ERROR;
                 }
-                
+
                 std::string func_name = strings_.get_string(function_name.as_string_id());
                 // Convert to lowercase for case-insensitive lookup
                 std::string func_name_lc = func_name;
                 std::transform(func_name_lc.begin(), func_name_lc.end(), func_name_lc.begin(), [](unsigned char c){ return std::tolower(c); });
-                auto it = host_functions_.find(func_name_lc);
 
                 tmp_args_.clear();
                 if (arg_count > 0) {
@@ -501,10 +498,12 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
                     }
                 }
 
-                if (it != host_functions_.end()) {
-                    Value result = it->second(tmp_args_);
-                    push(result);
-                    break;
+                if (host_env_) {
+                    auto result = host_env_->call_host(func_name_lc, tmp_args_);
+                    if (result.has_value()) {
+                        push(*result);
+                        break;
+                    }
                 }
 
                 // If not a host function, check for user-defined function in the chunk
@@ -514,14 +513,14 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
 
                     // Set function parameters as globals
                     const std::vector<std::string>& param_names = chunk.get_function_param_names(static_cast<size_t>(func_index));
-                    
+
                     // Save current parameter values
                     std::vector<Value> saved_param_values;
                     std::vector<bool> had_saved_params;
-                    
+
                     for (size_t i = 0; i < param_names.size(); ++i) {
                         const std::string& param_name = param_names[i];
-                        
+
                         // Save current value if it exists
                         auto global_it = globals_.find(param_name);
                         if (global_it != globals_.end()) {
@@ -531,10 +530,10 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
                             saved_param_values.push_back(Value::nil());
                             had_saved_params.push_back(false);
                         }
-                        
+
                         // Set parameter value
-                if (i < tmp_args_.size()) {
-                    set_global(param_name, tmp_args_[i]);
+                        if (i < tmp_args_.size()) {
+                            set_global(param_name, tmp_args_[i]);
                         } else {
                             set_global(param_name, Value::nil());
                         }
@@ -542,9 +541,9 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
 
                     // Save current stack state
                     Value* saved_stack_top = stack_top_;
-                    
+
                     VMResult r = execute(fchunk, &chunk);
-                    
+
                     // Restore parameter values
                     for (size_t i = 0; i < param_names.size(); ++i) {
                         const std::string& param_name = param_names[i];
@@ -554,13 +553,13 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
                             globals_.erase(param_name);
                         }
                     }
-                    
+
                     if (r != VMResult::OK) return r;
 
                     if (stack_top_ <= stack_) {
                         push(Value::nil());
                     }
-                    
+
                     Value return_value = pop();
                     if (return_value.type() == ValueType::STRING_BUFFER) {
                         uint32_t sid = strings_.intern(buffers_.get_buffer(return_value.as_buffer_id()));
@@ -581,10 +580,10 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
 
                         std::vector<Value> saved_param_values;
                         std::vector<bool> had_saved_params;
-                        
+
                         for (size_t i = 0; i < param_names.size(); ++i) {
                             const std::string& param_name = param_names[i];
-                            
+
                             // Save current value if it exists
                             auto global_it = globals_.find(param_name);
                             if (global_it != globals_.end()) {
@@ -594,7 +593,7 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
                                 saved_param_values.push_back(Value::nil());
                                 had_saved_params.push_back(false);
                             }
-                            
+
                             if (i < tmp_args_.size()) {
                                 set_global(param_name, tmp_args_[i]);
                             } else {
@@ -604,10 +603,10 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
 
                         // Save current stack state
                         Value* saved_stack_top = stack_top_;
-                        
+
                         // Execute function chunk pass parent chunk as parent for recursive lookups
                         VMResult r = execute(fchunk, parent_chunk);
-                        
+
                         // Restore parameter values
                         for (size_t i = 0; i < param_names.size(); ++i) {
                             const std::string& param_name = param_names[i];
@@ -617,7 +616,7 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
                                 globals_.erase(param_name);
                             }
                         }
-                        
+
                         if (r != VMResult::OK) return r;
 
                         if (stack_top_ <= stack_) {
@@ -667,7 +666,7 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
                         if (i == 0) break;
                     }
                 }
-                
+
                 ssize_t func_index = chunk.get_function_index(func_name_lc);
                 if (func_index >= 0) {
                     const std::vector<std::string>& param_names = chunk.get_function_param_names(static_cast<size_t>(func_index));
@@ -687,14 +686,16 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
                     continue; // Restart execution from the beginning
                 }
                 
-                auto it = host_functions_.find(func_name_lc);
-                if (it != host_functions_.end()) {
-                    Value result = it->second(tmp_args_);
-                    push(result);
-                } else {
-                    runtime_error("Unknown function in tail call: %s", func_name.c_str());
-                    return VMResult::RUNTIME_ERROR;
+                if (host_env_) {
+                    auto result = host_env_->call_host(func_name_lc, tmp_args_);
+                    if (result.has_value()) {
+                        push(*result);
+                        break;
+                    }
                 }
+
+                runtime_error("Unknown function in tail call: %s", func_name.c_str());
+                return VMResult::RUNTIME_ERROR;
                 break;
             }
             

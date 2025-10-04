@@ -29,10 +29,22 @@ string(REPLACE "-DDEBUG_TRACE_EXECUTION" "" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_F
 string(REPLACE "-DDEBUG_TRACE_EXECUTION" "" CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE}")
 
 # Source files
-file(GLOB_RECURSE SOURCES 
+file(GLOB_RECURSE ALL_SOURCES
     "src/*.cpp"
     "src/*.h"
 )
+
+# Separate nightscript sources into a static library so it can be extracted later
+file(GLOB_RECURSE NIGHTSCRIPT_SOURCES
+    "src/nightscript/*.cpp"
+    "src/nightscript/*.h"
+)
+
+# Sources for the main executable exclude nightscript (we'll link the library)
+set(SOURCES ${ALL_SOURCES})
+foreach(ns_file ${NIGHTSCRIPT_SOURCES})
+    list(REMOVE_ITEM SOURCES ${ns_file})
+endforeach()
 
 # Remove the converter and tools from main build
 list(FILTER SOURCES EXCLUDE REGEX "tools/.*")
@@ -47,12 +59,20 @@ else()
 endif()
 
 # Create main executable
+add_library(nightscript STATIC ${NIGHTSCRIPT_SOURCES})
+
+# Build main executable from remaining sources and link nightscript
 add_executable(nightforge ${SOURCES})
+target_link_libraries(nightforge PRIVATE nightscript)
 
 # Include directories
 target_include_directories(nightforge PRIVATE 
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rendering
+)
+
+target_include_directories(nightscript PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
 # Converter tool

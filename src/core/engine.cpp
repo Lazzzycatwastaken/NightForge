@@ -16,9 +16,31 @@
 
 namespace nightforge {
 
+// Simple HostEnvironment implementation that stores host functions
+class EngineHost : public nightscript::HostEnvironment {
+public:
+    void register_function(const std::string& name, nightscript::HostFunction func) override {
+        std::string key = name;
+        std::transform(key.begin(), key.end(), key.begin(), [](unsigned char c){ return std::tolower(c); });
+        host_functions_[key] = func;
+    }
+
+    std::optional<nightscript::Value> call_host(const std::string& name, const std::vector<nightscript::Value>& args) override {
+        auto it = host_functions_.find(name);
+        if (it != host_functions_.end()) {
+            return it->second(args);
+        }
+        return std::nullopt;
+    }
+
+private:
+    std::unordered_map<std::string, nightscript::HostFunction> host_functions_;
+};
+
 Engine::Engine(const Config& config) 
     : config_(config), running_(false), current_size_{0, 0} {
-    vm_ = std::make_unique<nightscript::VM>();
+    host_env_impl_ = std::make_unique<EngineHost>();
+    vm_ = std::make_unique<nightscript::VM>(host_env_impl_.get());
     terminal_ = std::unique_ptr<Terminal>(create_terminal());
     
     setup_host_functions();
@@ -239,7 +261,7 @@ void Engine::setup_host_functions() {
     using namespace nightscript;
 
     // show_text(string) - display text in dialogue panel
-    vm_->register_host_function("show_text", [this](const std::vector<Value>& args) -> Value {
+    host_env_impl_->register_function("show_text", [this](const std::vector<Value>& args) -> nightscript::Value {
         if (args.size() != 1 || args[0].type() != ValueType::STRING_ID) {
             std::cerr << "show_text: expected string argument" << std::endl;
             return Value::nil();
@@ -253,7 +275,7 @@ void Engine::setup_host_functions() {
     });
     
     // log(string) - debug output  
-    vm_->register_host_function("log", [this](const std::vector<Value>& args) -> Value {
+    host_env_impl_->register_function("log", [this](const std::vector<Value>& args) -> nightscript::Value {
         if (args.size() != 1 || args[0].type() != ValueType::STRING_ID) {
             std::cerr << "log: expected string argument" << std::endl;
             return Value::nil();
@@ -265,7 +287,7 @@ void Engine::setup_host_functions() {
         return Value::nil();
     });
     
-    vm_->register_host_function("wait", [this](const std::vector<Value>& args) -> Value {
+    host_env_impl_->register_function("wait", [this](const std::vector<Value>& args) -> nightscript::Value {
         if (args.size() != 1) {
             std::cerr << "wait: expected 1 argument (seconds)" << std::endl;
             return Value::nil();
@@ -301,7 +323,7 @@ void Engine::setup_host_functions() {
         return Value::nil();
     });
     
-    vm_->register_host_function("wait_ms", [this](const std::vector<Value>& args) -> Value {
+    host_env_impl_->register_function("wait_ms", [this](const std::vector<Value>& args) -> nightscript::Value {
         if (args.size() != 1) {
             std::cerr << "wait_ms: expected 1 argument (milliseconds)" << std::endl;
             return Value::nil();
@@ -338,7 +360,7 @@ void Engine::setup_host_functions() {
     // Game-specific host functions for NightScript
     
     // show_scene(string) - transition to a scene
-    vm_->register_host_function("show_scene", [this](const std::vector<Value>& args) -> Value {
+    host_env_impl_->register_function("show_scene", [this](const std::vector<Value>& args) -> nightscript::Value {
         if (args.size() != 1 || args[0].type() != ValueType::STRING_ID) {
             std::cerr << "show_scene: expected string argument (scene name)" << std::endl;
             return Value::nil();
@@ -352,7 +374,7 @@ void Engine::setup_host_functions() {
     });
     
     // show_choice(string, string) 
-    vm_->register_host_function("show_choice", [this](const std::vector<Value>& args) -> Value {
+    host_env_impl_->register_function("show_choice", [this](const std::vector<Value>& args) -> nightscript::Value {
         if (args.size() < 1 || args[0].type() != ValueType::STRING_ID) {
             std::cerr << "show_choice: expected at least 1 string argument (choice text)" << std::endl;
             return Value::nil();
@@ -369,7 +391,7 @@ void Engine::setup_host_functions() {
     });
     
     // set_variable(string, value) - set a game variable
-    vm_->register_host_function("set_variable", [this](const std::vector<Value>& args) -> Value {
+    host_env_impl_->register_function("set_variable", [this](const std::vector<Value>& args) -> nightscript::Value {
         if (args.size() != 2 || args[0].type() != ValueType::STRING_ID) {
             std::cerr << "set_variable: expected (string, value) arguments" << std::endl;
             return Value::nil();
@@ -385,7 +407,7 @@ void Engine::setup_host_functions() {
     });
     
     // get_variable(string) - get a game variable
-    vm_->register_host_function("get_variable", [this](const std::vector<Value>& args) -> Value {
+    host_env_impl_->register_function("get_variable", [this](const std::vector<Value>& args) -> nightscript::Value {
         if (args.size() != 1 || args[0].type() != ValueType::STRING_ID) {
             std::cerr << "get_variable: expected string argument (variable name)" << std::endl;
             return Value::nil();
@@ -398,7 +420,7 @@ void Engine::setup_host_functions() {
     });
     
     // save_state(string) - save game state to file
-    vm_->register_host_function("save_state", [this](const std::vector<Value>& args) -> Value {
+    host_env_impl_->register_function("save_state", [this](const std::vector<Value>& args) -> nightscript::Value {
         std::string save_name = "quicksave";
         if (args.size() > 0 && args[0].type() == ValueType::STRING_ID) {
             save_name = vm_->strings().get_string(args[0].as_string_id());
@@ -411,7 +433,7 @@ void Engine::setup_host_functions() {
     });
 
     // now() - return current time in seconds
-    vm_->register_host_function("now", [this](const std::vector<Value>&) -> Value {
+    host_env_impl_->register_function("now", [this](const std::vector<Value>&) -> nightscript::Value {
         using clock = std::chrono::steady_clock;
         auto now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(clock::now().time_since_epoch()).count();
         double seconds = static_cast<double>(now_ns) / 1e9;
@@ -419,7 +441,7 @@ void Engine::setup_host_functions() {
     });
     
     // load_state(string) - load game state from file
-    vm_->register_host_function("load_state", [this](const std::vector<Value>& args) -> Value {
+    host_env_impl_->register_function("load_state", [this](const std::vector<Value>& args) -> nightscript::Value {
         std::string save_name = "quicksave";
         if (args.size() > 0 && args[0].type() == ValueType::STRING_ID) {
             save_name = vm_->strings().get_string(args[0].as_string_id());
@@ -431,7 +453,7 @@ void Engine::setup_host_functions() {
         return Value::boolean(true); // success
     });
 
-    vm_->register_host_function("input", [this](const std::vector<Value>& args) -> Value {
+    host_env_impl_->register_function("input", [this](const std::vector<Value>& args) -> nightscript::Value {
         std::string prompt;
         if (args.size() > 0 && args[0].type() == ValueType::STRING_ID) {
             prompt = vm_->strings().get_string(args[0].as_string_id());
@@ -475,7 +497,7 @@ void Engine::setup_host_functions() {
     });
 
     // Buffer API buffer([initial_string]) -> buffer
-    vm_->register_host_function("buffer", [this](const std::vector<Value>& args) -> Value {
+    host_env_impl_->register_function("buffer", [this](const std::vector<Value>& args) -> nightscript::Value {
         using namespace nightscript;
         if (args.size() == 0) {
             uint32_t id = vm_->buffers().create_from_two(std::string(), std::string());
@@ -497,7 +519,7 @@ void Engine::setup_host_functions() {
     });
 
     // buffer_append(buffer, value)
-    vm_->register_host_function("buffer_append", [this](const std::vector<Value>& args) -> Value {
+    host_env_impl_->register_function("buffer_append", [this](const std::vector<Value>& args) -> nightscript::Value {
         using namespace nightscript;
         if (args.size() != 2) {
             std::cerr << "buffer_append: expected (buffer, value)" << std::endl;
@@ -548,7 +570,7 @@ void Engine::setup_host_functions() {
     });
 
     // buffer_reserve(buffer, capacity)
-    vm_->register_host_function("buffer_reserve", [this](const std::vector<Value>& args) -> Value {
+    host_env_impl_->register_function("buffer_reserve", [this](const std::vector<Value>& args) -> nightscript::Value {
         using namespace nightscript;
         if (args.size() != 2 || args[0].type() != ValueType::STRING_BUFFER || args[1].type() != ValueType::INT) {
             std::cerr << "buffer_reserve: expected (buffer, int)" << std::endl;
@@ -559,7 +581,7 @@ void Engine::setup_host_functions() {
     });
 
     // buffer_flatten(buffer) -> string_id
-    vm_->register_host_function("buffer_flatten", [this](const std::vector<Value>& args) -> Value {
+    host_env_impl_->register_function("buffer_flatten", [this](const std::vector<Value>& args) -> nightscript::Value {
         using namespace nightscript;
         if (args.size() != 1 || args[0].type() != ValueType::STRING_BUFFER) {
             std::cerr << "buffer_flatten: expected (buffer)" << std::endl;
@@ -571,7 +593,7 @@ void Engine::setup_host_functions() {
     });
 
     // type(value) -> string ("nil","bool","int","float","string","buffer","table")
-    vm_->register_host_function("type", [this](const std::vector<Value>& args) -> Value {
+    host_env_impl_->register_function("type", [this](const std::vector<Value>& args) -> nightscript::Value {
         using namespace nightscript;
         if (args.size() != 1) return Value::nil();
         const Value& v0 = args[0];

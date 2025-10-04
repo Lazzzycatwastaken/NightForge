@@ -4,6 +4,7 @@
 #include "../rendering/tui_renderer.h"
 #include "../nightscript/vm.h"
 #include "../nightscript/compiler.h"
+#include "../nightscript/host_api.h"
 #include <memory>
 
 namespace nightforge {
@@ -20,6 +21,7 @@ private:
     bool running_;
     std::unique_ptr<TUIRenderer> renderer_;
     std::unique_ptr<nightscript::VM> vm_;
+    std::unique_ptr<nightscript::HostEnvironment> host_env_impl_;
     std::unique_ptr<Terminal> terminal_;
     
     bool init_terminal();
