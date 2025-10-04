@@ -15,7 +15,6 @@ void Chunk::write_constant(const Value& value, int line) {
         write_byte(static_cast<uint8_t>(OpCode::OP_CONSTANT), line);
         write_byte(static_cast<uint8_t>(index), line);
     } else {
-        // TODO: handle more than 256 constants (for now just error out)
         std::cerr << "Too many constants in chunk!" << std::endl;
     }
 }
