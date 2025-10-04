@@ -33,6 +33,7 @@ enum class TokenType {
     ON_ENTER,
     THEN,
     FUNCTION,
+    LOCAL,
     
     // Operators
     ASSIGN,      // =

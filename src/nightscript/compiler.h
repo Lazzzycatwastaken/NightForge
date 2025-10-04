@@ -22,6 +22,9 @@ public:
     
     bool compile(const std::string& source, Chunk& chunk, StringTable& strings);
     
+    bool load_cached_bytecode(const std::string& source_path, Chunk& chunk, StringTable& strings);
+    void save_bytecode_cache(const std::string& source_path, const Chunk& chunk, const StringTable& strings);
+    
 private:
     std::vector<Token> tokens_;
     size_t current_;
@@ -30,6 +33,8 @@ private:
     
     std::unordered_map<std::string, InferredType> variable_types_;
     InferredType last_expression_type_;
+    std::vector<std::string> current_local_params_; // names of params when compiling a function
+    std::vector<std::string> current_local_locals_;  // names of local variables declared inside current function
     
     // Performance stats
     struct CompileStats {
@@ -55,7 +60,8 @@ private:
     void identifier();
     void grouping();
     void unary();
-    void binary();
+    // NOTE: full operator precedence parsing handled by expression_precedence().
+    // The old `binary()` placeholder was removed (dead code)
     void statement();
     void expression_statement();
     void assignment_statement();
@@ -83,10 +89,6 @@ private:
     
     bool is_tail_position_;
     void emit_tail_call_optimized(const std::string& func_name, uint8_t arg_count);
-    
-    // Bytecode caching
-    bool load_cached_bytecode(const std::string& source_path, Chunk& chunk);
-    void save_bytecode_cache(const std::string& source_path, const Chunk& chunk);
     
     // Bytecode emission
     void emit_byte(uint8_t byte);

@@ -40,6 +40,15 @@ Value Chunk::get_constant(size_t index) const {
 size_t Chunk::add_function(const Chunk& function_chunk, const std::vector<std::string>& param_names, const std::string& function_name) {
     functions_.push_back(function_chunk);
     function_params_.push_back(param_names);
+    function_locals_.push_back(std::vector<std::string>()); // empty locals by default
+    function_names_.push_back(function_name);
+    return functions_.size() - 1;
+}
+
+size_t Chunk::add_function(const Chunk& function_chunk, const std::vector<std::string>& param_names, const std::vector<std::string>& local_names, const std::string& function_name) {
+    functions_.push_back(function_chunk);
+    function_params_.push_back(param_names);
+    function_locals_.push_back(local_names);
     function_names_.push_back(function_name);
     return functions_.size() - 1;
 }
@@ -50,6 +59,10 @@ const Chunk& Chunk::get_function(size_t index) const {
 
 const std::vector<std::string>& Chunk::get_function_param_names(size_t index) const {
     return function_params_[index];
+}
+
+const std::vector<std::string>& Chunk::get_function_local_names(size_t index) const {
+    return function_locals_[index];
 }
 
 ssize_t Chunk::get_function_index(const std::string& name) const {

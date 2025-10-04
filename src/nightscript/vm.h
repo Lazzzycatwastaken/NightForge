@@ -5,6 +5,13 @@
 #include <unordered_map>
 #include <vector>
 
+// Enable computed goto optimization for GCC/Clang
+#if defined(__GNUC__) || defined(__clang__)
+    #define USE_COMPUTED_GOTO 1
+#else
+    #define USE_COMPUTED_GOTO 0
+#endif
+
 namespace nightforge {
 namespace nightscript {
 
@@ -40,6 +47,13 @@ public:
     void collect_garbage(const Chunk* active_chunk = nullptr);
     void mark_reachable_strings(const Chunk* active_chunk = nullptr);
     
+    // Global variables
+    void set_global(const std::string& name, const Value& value);
+    Value get_global(const std::string& name);
+    
+    // Debug
+    void print_stack();
+    
     // Performance counters
     struct Stats {
         size_t gc_collections = 0;
@@ -48,12 +62,23 @@ public:
         double total_gc_time = 0.0;
     } stats;
     
-    // Global variables
-    void set_global(const std::string& name, const Value& value);
-    Value get_global(const std::string& name);
+private:
+    // Helper for fast string conversion
+    std::string value_to_string(const Value& val);
     
-    // Debug
-    void print_stack();
+#if USE_COMPUTED_GOTO
+    void* dispatch_table_[256];
+    void init_dispatch_table();
+#endif
+
+    std::vector<Value> param_stack_;
+    std::vector<std::unordered_map<std::string, size_t>> local_frames_;
+    std::vector<size_t> local_frame_bases_; // base index per frame
+
+    // Local frame helpers
+    void push_local_frame(const std::vector<std::string>& locals_combined, const std::vector<Value>& args);
+    void pop_local_frame();
+    bool local_lookup(const std::string& name, Value& out) const;
     
 private:
     static constexpr size_t STACK_MAX = 16384; // those who know

@@ -209,49 +209,60 @@ void Engine::render() {
 void Engine::execute_script_file(const std::string& filename) {
     std::cout << "=== Executing Script: " << filename << " ===" << std::endl;
     
-    // Read file
-    std::ifstream file(filename);
-    if (!file.is_open()) {
-        std::cerr << "Error: Could not open script file: " << filename << std::endl;
-        return;
-    }
-    
-    std::string source;
-    std::string line;
-    while (std::getline(file, line)) {
-        source += line + "\n";
-    }
-    file.close();
-    
-    if (source.empty()) {
-        std::cerr << "Error: Script file is empty: " << filename << std::endl;
-        return;
-    }
-    
-    std::cout << "Compiling script..." << std::endl;
-    
     nightscript::Compiler compiler;
     nightscript::Chunk chunk;
     
-    if (compiler.compile(source, chunk, vm_->strings())) {
-        std::cout << "Compilation successful!" << std::endl;
-        std::cout << "Executing..." << std::endl;
-        
-        nightscript::VMResult result = vm_->execute(chunk);
-        
-        switch (result) {
-            case nightscript::VMResult::OK:
-                std::cout << "Execution completed successfully!" << std::endl;
-                break;
-            case nightscript::VMResult::COMPILE_ERROR:
-                std::cout << "Compilation error!" << std::endl;
-                break;
-            case nightscript::VMResult::RUNTIME_ERROR:
-                std::cout << "Runtime error!" << std::endl;
-                break;
-        }
+    // Try loading cached bytecode first - 50-100x faster!
+    if (compiler.load_cached_bytecode(filename, chunk, vm_->strings())) {
+        std::cout << "Loaded cached bytecode (fast asf)" << std::endl;
     } else {
-        std::cout << "Compilation failed!" << std::endl;
+        std::cout << "Cache miss - compiling from source..." << std::endl;
+        
+        // Read source file
+        std::ifstream file(filename);
+        if (!file.is_open()) {
+            std::cerr << "Error: Could not open script file: " << filename << std::endl;
+            return;
+        }
+        
+        std::string source;
+        std::string line;
+        while (std::getline(file, line)) {
+            source += line + "\n";
+        }
+        file.close();
+        
+        if (source.empty()) {
+            std::cerr << "Error: Script file is empty: " << filename << std::endl;
+            return;
+        }
+        
+        // Compile from source
+        if (!compiler.compile(source, chunk, vm_->strings())) {
+            std::cout << "Compilation failed!" << std::endl;
+            return;
+        }
+        
+        // Cache the compiled bytecode for next time
+        compiler.save_bytecode_cache(filename, chunk, vm_->strings());
+        std::cout << "Bytecode cached for future runs!" << std::endl;
+    }
+    
+    // Execute the chunk (whether from cache or freshly compiled)
+    std::cout << "Executing..." << std::endl;
+    
+    nightscript::VMResult result = vm_->execute(chunk);
+    
+    switch (result) {
+        case nightscript::VMResult::OK:
+            std::cout << "Execution completed successfully!" << std::endl;
+            break;
+        case nightscript::VMResult::COMPILE_ERROR:
+            std::cout << "Compilation error!" << std::endl;
+            break;
+        case nightscript::VMResult::RUNTIME_ERROR:
+            std::cout << "Runtime error!" << std::endl;
+            break;
     }
     
     std::cout << "=== Script Complete ===" << std::endl;
@@ -269,7 +280,7 @@ void Engine::setup_host_functions() {
         
         std::string text = vm_->strings().get_string(args[0].as_string_id());
         std::cout << "[SHOW_TEXT] " << text << std::endl;
-        // TODO: integrate with TUI renderer properly
+    // TODO: replace this debug print with TUI rendering call
         
         return Value::nil();
     });
@@ -368,7 +379,7 @@ void Engine::setup_host_functions() {
         
         std::string scene_name = vm_->strings().get_string(args[0].as_string_id());
         std::cout << "[SHOW_SCENE] Transitioning to: " << scene_name << std::endl;
-        // TODO: integrate with scene manager
+    // TODO: hook this to the scene manager (placeholder for now)
         
         return Value::nil();
     });
@@ -385,7 +396,7 @@ void Engine::setup_host_functions() {
             ? vm_->strings().get_string(args[1].as_string_id()) : "default";
         
         std::cout << "[SHOW_CHOICE] " << choice_text << " -> " << target << std::endl;
-        // TODO: integrate with choice system
+    // TODO: forward choice data to choice manager/UI
         
         return Value::nil();
     });
@@ -427,7 +438,7 @@ void Engine::setup_host_functions() {
         }
         
         std::cout << "[SAVE_STATE] Saving to: " << save_name << std::endl;
-        // TODO: implement actual save/load with binary snapshot
+    // TODO: implement binary save/load (currently stubbed)
         
         return Value::boolean(true); // success
     });
@@ -448,7 +459,7 @@ void Engine::setup_host_functions() {
         }
         
         std::cout << "[LOAD_STATE] Loading from: " << save_name << std::endl;
-        // TODO: implement actual save/load
+    // TODO: implement real save/load (file I/O currently placeholder)
         
         return Value::boolean(true); // success
     });

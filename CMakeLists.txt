@@ -87,6 +87,17 @@ target_include_directories(webp_to_ascii PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rendering
 )
 
+# NightScript standalone compiler
+add_executable(nscompile
+    tools/nscompile.cpp
+)
+
+target_link_libraries(nscompile PRIVATE nightscript)
+
+target_include_directories(nscompile PRIVATE 
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
 # Test runner
 file(GLOB_RECURSE TEST_SOURCES 
     "src/*.cpp"
@@ -122,6 +133,7 @@ endif()
 # Install targets
 install(TARGETS nightforge DESTINATION bin)
 install(TARGETS webp_to_ascii DESTINATION bin)
+install(TARGETS nscompile DESTINATION bin)
 if(TARGET test_runner)
     install(TARGETS test_runner DESTINATION bin)
 endif()

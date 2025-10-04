@@ -2,6 +2,7 @@
 #include <iostream>
 #include <cstdlib>
 #include <fstream>
+#include <algorithm>
 #include <sys/stat.h>
 #include <ctime>
 
@@ -16,8 +17,6 @@ Compiler::Compiler() : current_(0), chunk_(nullptr), strings_(nullptr),
 bool Compiler::compile(const std::string& source, Chunk& chunk, StringTable& strings) {
     Lexer lexer(source);
     tokens_ = lexer.tokenize();
-
-    // this is only for debugging
     // for (const auto& t : tokens_) {
     //     std::cerr << "[tok] line=" << t.line << " type=" << static_cast<int>(t.type) << " lex='" << t.lexeme << "'\n";
     // }
@@ -218,15 +217,23 @@ void Compiler::identifier() {
         return;
     }
 
-    // Add variable name to constants table and emit OP_GET_GLOBAL with index
-    size_t name_constant = chunk_->add_constant(Value::string_id(name_id));
-    emit_bytes(static_cast<uint8_t>(OpCode::OP_GET_GLOBAL), static_cast<uint8_t>(name_constant));
-    
-    last_expression_type_ = infer_variable_type(name.lexeme);
-}
+    std::vector<std::string> combined_locals;
+    combined_locals.reserve(current_local_params_.size() + current_local_locals_.size());
+    for (const auto &p : current_local_params_) combined_locals.push_back(p);
+    for (const auto &l : current_local_locals_) combined_locals.push_back(l);
 
-void Compiler::binary() {
-    // TODO: implement proper precedence parsing
+    auto it = std::find(combined_locals.begin(), combined_locals.end(), name.lexeme);
+    if (it != combined_locals.end()) {
+        size_t idx = static_cast<size_t>(std::distance(combined_locals.begin(), it));
+        emit_byte(static_cast<uint8_t>(OpCode::OP_GET_LOCAL));
+        emit_byte(static_cast<uint8_t>(idx));
+    } else {
+        // Add variable name to constants table and emit OP_GET_GLOBAL with index
+        size_t name_constant = chunk_->add_constant(Value::string_id(name_id));
+        emit_bytes(static_cast<uint8_t>(OpCode::OP_GET_GLOBAL), static_cast<uint8_t>(name_constant));
+    }
+
+    last_expression_type_ = infer_variable_type(name.lexeme);
 }
 
 void Compiler::statement() {
@@ -251,6 +258,25 @@ void Compiler::statement() {
         return_statement();
     } else if (check(TokenType::FUNCTION)) {
         function_declaration();
+    } else if (check(TokenType::LOCAL)) {
+        advance();
+        if (!check(TokenType::IDENTIFIER)) {
+            error("Expected local variable name");
+            return;
+        }
+        Token name = current_token(); advance();
+        current_local_locals_.push_back(name.lexeme);
+        while (match(TokenType::COMMA)) {
+            if (check(TokenType::IDENTIFIER)) {
+                Token n = current_token(); advance();
+                current_local_locals_.push_back(n.lexeme);
+            } else {
+                error("Expected local variable name");
+                break;
+            }
+        }
+        // local declarations do not emit runtime ops; they just reserve names
+        return;
     } else if (check(TokenType::TABLE)) {
         table_declaration();
     // Check for assignment: identifier = expression
@@ -326,11 +352,20 @@ void Compiler::assignment_statement() {
     
     set_variable_type(name.lexeme, last_expression_type_);
     
-    // Add variable name to constants table and emit OP_SET_GLOBAL with index
-    size_t name_constant = chunk_->add_constant(Value::string_id(name_id));
-    emit_bytes(static_cast<uint8_t>(OpCode::OP_SET_GLOBAL), static_cast<uint8_t>(name_constant));
-    // This is a statement-level assignment; discard the resulting value
-    // so it doesn't accumulate on the VM stack across iterations.
+    std::vector<std::string> combined_locals;
+    combined_locals.reserve(current_local_params_.size() + current_local_locals_.size());
+    for (const auto &p : current_local_params_) combined_locals.push_back(p);
+    for (const auto &l : current_local_locals_) combined_locals.push_back(l);
+
+    auto it = std::find(combined_locals.begin(), combined_locals.end(), name.lexeme);
+    if (it != combined_locals.end()) {
+        size_t idx = static_cast<size_t>(std::distance(combined_locals.begin(), it));
+        emit_byte(static_cast<uint8_t>(OpCode::OP_SET_LOCAL));
+        emit_byte(static_cast<uint8_t>(idx));
+    } else {
+        size_t name_constant = chunk_->add_constant(Value::string_id(name_id));
+        emit_bytes(static_cast<uint8_t>(OpCode::OP_SET_GLOBAL), static_cast<uint8_t>(name_constant));
+    }
     emit_byte(static_cast<uint8_t>(OpCode::OP_POP));
 }
 
@@ -515,6 +550,8 @@ void Compiler::function_declaration() {
     // Save current chunk and switch to function chunk
     Chunk* saved_chunk = chunk_;
     chunk_ = &func_chunk;
+    current_local_params_ = param_names;
+    current_local_locals_.clear();
 
     // compile body until END
     while (!check(TokenType::END) && !check(TokenType::EOF_TOKEN)) {
@@ -530,10 +567,19 @@ void Compiler::function_declaration() {
     // restore
     chunk_ = saved_chunk;
 
+    // Combine params + locals for chunk storage (params first, then locals)
+    std::vector<std::string> combined;
+    combined.reserve(current_local_params_.size() + current_local_locals_.size());
+    for (const auto &p : current_local_params_) combined.push_back(p);
+    for (const auto &l : current_local_locals_) combined.push_back(l);
+
     std::string func_name_lc = func_name;
     for (auto &c : func_name_lc) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
 
-    chunk_->add_function(func_chunk, param_names, func_name_lc);
+    chunk_->add_function(func_chunk, param_names, combined, func_name_lc);
+
+    current_local_params_.clear();
+    current_local_locals_.clear();
 }
 
 void Compiler::table_declaration() {
@@ -855,7 +901,7 @@ void Compiler::emit_tail_call_optimized(const std::string& func_name, uint8_t ar
     }
 }
 
-bool Compiler::load_cached_bytecode(const std::string& source_path, Chunk& chunk) {
+bool Compiler::load_cached_bytecode(const std::string& source_path, Chunk& chunk, StringTable& strings) {
     std::string cache_path = source_path + ".nsc"; // NightScript Compiled
     
     std::ifstream cache_file(cache_path, std::ios::binary);
@@ -871,7 +917,7 @@ bool Compiler::load_cached_bytecode(const std::string& source_path, Chunk& chunk
     cache_file.read(reinterpret_cast<char*>(&version), sizeof(version));
     cache_file.read(reinterpret_cast<char*>(&cached_timestamp), sizeof(cached_timestamp));
     
-    if (magic != 0x4E534300 || version != 1) { // "NSC\0" (losing it)
+    if (magic != 0x4E534300 || version != 2) { // "NSC\0"
         return false; // Invalid cache
     }
     
@@ -889,20 +935,46 @@ bool Compiler::load_cached_bytecode(const std::string& source_path, Chunk& chunk
         uint32_t constants_count;
         cache_file.read(reinterpret_cast<char*>(&constants_count), sizeof(constants_count));
         
-        // Read constants (simplified only strings for now)
         for (uint32_t i = 0; i < constants_count; ++i) {
             uint8_t type;
             cache_file.read(reinterpret_cast<char*>(&type), sizeof(type));
-            
-            if (type == static_cast<uint8_t>(ValueType::STRING_ID)) {
-                uint32_t str_len;
-                cache_file.read(reinterpret_cast<char*>(&str_len), sizeof(str_len));
-                std::string str(str_len, '\0');
-                cache_file.read(&str[0], str_len);
-                uint32_t id = strings_->intern(str);
-                chunk.add_constant(Value::string_id(id));
+
+            switch (static_cast<ValueType>(type)) {
+                case ValueType::NIL: {
+                    chunk.add_constant(Value::nil());
+                    break;
+                }
+                case ValueType::BOOL: {
+                    uint8_t b;
+                    cache_file.read(reinterpret_cast<char*>(&b), sizeof(b));
+                    chunk.add_constant(Value::boolean(b != 0));
+                    break;
+                }
+                case ValueType::INT: {
+                    int64_t v;
+                    cache_file.read(reinterpret_cast<char*>(&v), sizeof(v));
+                    chunk.add_constant(Value::integer(v));
+                    break;
+                }
+                case ValueType::FLOAT: {
+                    double d;
+                    cache_file.read(reinterpret_cast<char*>(&d), sizeof(d));
+                    chunk.add_constant(Value::floating(d));
+                    break;
+                }
+                case ValueType::STRING_ID: {
+                    uint32_t str_len;
+                    cache_file.read(reinterpret_cast<char*>(&str_len), sizeof(str_len));
+                    std::string str(str_len, '\0');
+                    cache_file.read(&str[0], str_len);
+                    uint32_t id = strings.intern(str);
+                    chunk.add_constant(Value::string_id(id));
+                    break;
+                }
+                default: {
+                    return false;
+                }
             }
-            // TODO: Add other value types
         }
         
         // Read bytecode
@@ -914,14 +986,98 @@ bool Compiler::load_cached_bytecode(const std::string& source_path, Chunk& chunk
             cache_file.read(reinterpret_cast<char*>(&byte), sizeof(byte));
             chunk.write_byte(byte, 1); // Line numbers not cached for simplicity
         }
-        
+
+        // Read functions (top-level)
+        uint32_t functions_count = 0;
+        cache_file.read(reinterpret_cast<char*>(&functions_count), sizeof(functions_count));
+        for (uint32_t fi = 0; fi < functions_count; ++fi) {
+            // Function name
+            uint32_t fname_len;
+            cache_file.read(reinterpret_cast<char*>(&fname_len), sizeof(fname_len));
+            std::string fname(fname_len, '\0');
+            cache_file.read(&fname[0], fname_len);
+
+            // Parameters
+            uint32_t param_count;
+            cache_file.read(reinterpret_cast<char*>(&param_count), sizeof(param_count));
+            std::vector<std::string> param_names;
+            for (uint32_t pi = 0; pi < param_count; ++pi) {
+                uint32_t plen;
+                cache_file.read(reinterpret_cast<char*>(&plen), sizeof(plen));
+                std::string pname(plen, '\0');
+                cache_file.read(&pname[0], plen);
+                param_names.push_back(pname);
+            }
+
+            // Function constants
+            uint32_t fconst_count;
+            cache_file.read(reinterpret_cast<char*>(&fconst_count), sizeof(fconst_count));
+            Chunk fchunk;
+            for (uint32_t ci = 0; ci < fconst_count; ++ci) {
+                uint8_t type;
+                cache_file.read(reinterpret_cast<char*>(&type), sizeof(type));
+                switch (static_cast<ValueType>(type)) {
+                    case ValueType::NIL:
+                        fchunk.add_constant(Value::nil());
+                        break;
+                    case ValueType::BOOL: {
+                        uint8_t b; cache_file.read(reinterpret_cast<char*>(&b), sizeof(b));
+                        fchunk.add_constant(Value::boolean(b != 0));
+                        break;
+                    }
+                    case ValueType::INT: {
+                        int64_t v; cache_file.read(reinterpret_cast<char*>(&v), sizeof(v));
+                        fchunk.add_constant(Value::integer(v));
+                        break;
+                    }
+                    case ValueType::FLOAT: {
+                        double d; cache_file.read(reinterpret_cast<char*>(&d), sizeof(d));
+                        fchunk.add_constant(Value::floating(d));
+                        break;
+                    }
+                    case ValueType::STRING_ID: {
+                        uint32_t sl; cache_file.read(reinterpret_cast<char*>(&sl), sizeof(sl));
+                        std::string s(sl, '\0'); cache_file.read(&s[0], sl);
+                        uint32_t id = strings.intern(s);
+                        fchunk.add_constant(Value::string_id(id));
+                        break;
+                    }
+                    default:
+                        return false;
+                }
+            }
+
+            // Locals (read combined locals stored by compiler)
+            uint32_t local_count = 0;
+            cache_file.read(reinterpret_cast<char*>(&local_count), sizeof(local_count));
+            std::vector<std::string> local_names;
+            for (uint32_t li = 0; li < local_count; ++li) {
+                uint32_t llen;
+                cache_file.read(reinterpret_cast<char*>(&llen), sizeof(llen));
+                std::string lname(llen, '\0');
+                cache_file.read(&lname[0], llen);
+                local_names.push_back(lname);
+            }
+
+            // Function code
+            uint32_t fcode_size;
+            cache_file.read(reinterpret_cast<char*>(&fcode_size), sizeof(fcode_size));
+            for (uint32_t bi = 0; bi < fcode_size; ++bi) {
+                uint8_t byte; cache_file.read(reinterpret_cast<char*>(&byte), sizeof(byte));
+                fchunk.write_byte(byte, 1);
+            }
+
+            // Add function to parent chunk (with locals)
+            chunk.add_function(fchunk, param_names, local_names, fname);
+        }
+
         return true;
     } catch (...) {
         return false; // Error reading cache
     }
 }
 
-void Compiler::save_bytecode_cache(const std::string& source_path, const Chunk& chunk) {
+void Compiler::save_bytecode_cache(const std::string& source_path, const Chunk& chunk, const StringTable& strings) {
     std::string cache_path = source_path + ".nsc";
     
     std::ofstream cache_file(cache_path, std::ios::binary);
@@ -931,7 +1087,7 @@ void Compiler::save_bytecode_cache(const std::string& source_path, const Chunk& 
     
     // Write header
     uint32_t magic = 0x4E534300; // "NSC\0"
-    uint16_t version = 1;
+    uint16_t version = 2;
     uint64_t timestamp = static_cast<uint64_t>(time(nullptr));
     
     cache_file.write(reinterpret_cast<const char*>(&magic), sizeof(magic));
@@ -946,14 +1102,39 @@ void Compiler::save_bytecode_cache(const std::string& source_path, const Chunk& 
     for (const auto& constant : constants) {
         uint8_t type = static_cast<uint8_t>(constant.type());
         cache_file.write(reinterpret_cast<const char*>(&type), sizeof(type));
-        
-        if (constant.type() == ValueType::STRING_ID) {
-            const std::string& str = strings_->get_string(constant.as_string_id());
-            uint32_t str_len = static_cast<uint32_t>(str.length());
-            cache_file.write(reinterpret_cast<const char*>(&str_len), sizeof(str_len));
-            cache_file.write(str.c_str(), str_len);
+
+        switch (constant.type()) {
+            case ValueType::NIL: {
+                // nothing more to write
+                break;
+            }
+            case ValueType::BOOL: {
+                uint8_t b = constant.as_boolean() ? 1 : 0;
+                cache_file.write(reinterpret_cast<const char*>(&b), sizeof(b));
+                break;
+            }
+            case ValueType::INT: {
+                int64_t v = constant.as_integer();
+                cache_file.write(reinterpret_cast<const char*>(&v), sizeof(v));
+                break;
+            }
+            case ValueType::FLOAT: {
+                double d = constant.as_floating();
+                cache_file.write(reinterpret_cast<const char*>(&d), sizeof(d));
+                break;
+            }
+            case ValueType::STRING_ID: {
+                const std::string& str = strings.get_string(constant.as_string_id());
+                uint32_t str_len = static_cast<uint32_t>(str.length());
+                cache_file.write(reinterpret_cast<const char*>(&str_len), sizeof(str_len));
+                cache_file.write(str.c_str(), str_len);
+                break;
+            }
+            default: {
+                // skip (shouldn't occur)
+                break;
+            }
         }
-        // TODO: Add other value types
     }
     
     // Write bytecode
@@ -961,6 +1142,81 @@ void Compiler::save_bytecode_cache(const std::string& source_path, const Chunk& 
     uint32_t code_size = static_cast<uint32_t>(code.size());
     cache_file.write(reinterpret_cast<const char*>(&code_size), sizeof(code_size));
     cache_file.write(reinterpret_cast<const char*>(code.data()), code_size);
+
+    // Write functions (top-level only)
+    uint32_t functions_count = static_cast<uint32_t>(chunk.function_count());
+    cache_file.write(reinterpret_cast<const char*>(&functions_count), sizeof(functions_count));
+
+    for (uint32_t fi = 0; fi < functions_count; ++fi) {
+        const Chunk& fchunk = chunk.get_function(fi);
+        const auto& param_names = chunk.get_function_param_names(fi);
+        const std::string& fname = chunk.function_name(fi);
+
+        // Function name
+        uint32_t fname_len = static_cast<uint32_t>(fname.length());
+        cache_file.write(reinterpret_cast<const char*>(&fname_len), sizeof(fname_len));
+        cache_file.write(fname.c_str(), fname_len);
+
+        // Parameters
+        uint32_t param_count = static_cast<uint32_t>(param_names.size());
+        cache_file.write(reinterpret_cast<const char*>(&param_count), sizeof(param_count));
+        for (const auto& p : param_names) {
+            uint32_t plen = static_cast<uint32_t>(p.length());
+            cache_file.write(reinterpret_cast<const char*>(&plen), sizeof(plen));
+            cache_file.write(p.c_str(), plen);
+        }
+
+        // Locals (combined names stored in parent chunk as function_local_names)
+        const auto& local_names = chunk.get_function_local_names(fi);
+        uint32_t local_count = static_cast<uint32_t>(local_names.size());
+        cache_file.write(reinterpret_cast<const char*>(&local_count), sizeof(local_count));
+        for (const auto& l : local_names) {
+            uint32_t llen = static_cast<uint32_t>(l.length());
+            cache_file.write(reinterpret_cast<const char*>(&llen), sizeof(llen));
+            cache_file.write(l.c_str(), llen);
+        }
+
+        // Function constants
+        const auto& fconsts = fchunk.constants();
+        uint32_t fconst_count = static_cast<uint32_t>(fconsts.size());
+        cache_file.write(reinterpret_cast<const char*>(&fconst_count), sizeof(fconst_count));
+        for (const auto& constant : fconsts) {
+            uint8_t type = static_cast<uint8_t>(constant.type());
+            cache_file.write(reinterpret_cast<const char*>(&type), sizeof(type));
+            switch (constant.type()) {
+                case ValueType::NIL: break;
+                case ValueType::BOOL: {
+                    uint8_t b = constant.as_boolean() ? 1 : 0;
+                    cache_file.write(reinterpret_cast<const char*>(&b), sizeof(b));
+                    break;
+                }
+                case ValueType::INT: {
+                    int64_t v = constant.as_integer();
+                    cache_file.write(reinterpret_cast<const char*>(&v), sizeof(v));
+                    break;
+                }
+                case ValueType::FLOAT: {
+                    double d = constant.as_floating();
+                    cache_file.write(reinterpret_cast<const char*>(&d), sizeof(d));
+                    break;
+                }
+                case ValueType::STRING_ID: {
+                    const std::string& str = strings.get_string(constant.as_string_id());
+                    uint32_t str_len = static_cast<uint32_t>(str.length());
+                    cache_file.write(reinterpret_cast<const char*>(&str_len), sizeof(str_len));
+                    cache_file.write(str.c_str(), str_len);
+                    break;
+                }
+                default: break;
+            }
+        }
+
+        // Function code
+        const auto& fcode = fchunk.code();
+        uint32_t fcode_size = static_cast<uint32_t>(fcode.size());
+        cache_file.write(reinterpret_cast<const char*>(&fcode_size), sizeof(fcode_size));
+        if (fcode_size > 0) cache_file.write(reinterpret_cast<const char*>(fcode.data()), fcode_size);
+    }
 }
 
 } // namespace nightscript

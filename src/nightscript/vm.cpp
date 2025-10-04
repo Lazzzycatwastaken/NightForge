@@ -173,91 +173,33 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
                 Value b = pop();
                 Value a = pop();
                 
-                // Convert both operands to strings (like binary_op does)
-                std::string str_a, str_b;
-                
-                // Convert a to string
-                if (a.type() == ValueType::STRING_ID) {
-                    str_a = strings_.get_string(a.as_string_id());
-                } else if (a.type() == ValueType::INT) {
-                    char buf[32];
-                    auto res = std::to_chars(buf, buf + sizeof(buf), a.as_integer());
-                    str_a.assign(buf, res.ptr);
-                } else if (a.type() == ValueType::FLOAT) {
-                    // fall back to snprintf for floating formatting
-                    char buf[64];
-                    int n = snprintf(buf, sizeof(buf), "%g", a.as_floating());
-                    if (n > 0) str_a.assign(buf, static_cast<size_t>(n));
-                } else if (a.type() == ValueType::BOOL) {
-                    str_a = a.as_boolean() ? "true" : "false";
-                } else if (a.type() == ValueType::NIL) {
-                    str_a = "nil";
-                } else {
-                    str_a = "unknown";
-                }
-                
-                // Convert b to string
-                if (b.type() == ValueType::STRING_ID) {
-                    str_b = strings_.get_string(b.as_string_id());
-                } else if (b.type() == ValueType::INT) {
-                    char buf[32];
-                    auto res = std::to_chars(buf, buf + sizeof(buf), b.as_integer());
-                    str_b.assign(buf, res.ptr);
-                } else if (b.type() == ValueType::FLOAT) {
-                    char buf[64];
-                    int n = snprintf(buf, sizeof(buf), "%g", b.as_floating());
-                    if (n > 0) str_b.assign(buf, static_cast<size_t>(n));
-                } else if (b.type() == ValueType::BOOL) {
-                    str_b = b.as_boolean() ? "true" : "false";
-                } else if (b.type() == ValueType::NIL) {
-                    str_b = "nil";
-                } else {
-                    str_b = "unknown";
-                }
-                
-                // Prefer buffers
-                if (a.type() == ValueType::STRING_BUFFER) {
-                    uint32_t buf_id = a.as_buffer_id();
-                    if (b.type() == ValueType::STRING_BUFFER) {
-                        buffers_.append_id(buf_id, b.as_buffer_id(), strings_);
-                    } else if (b.type() == ValueType::STRING_ID) {
-                        buffers_.append_id(buf_id, b.as_string_id(), strings_);
-                    } else {
-                        buffers_.append_literal(buf_id, str_b);
-                    }
-                    push(Value::buffer_id(buf_id));
-                } else if (b.type() == ValueType::STRING_BUFFER) {
-                    uint32_t buf_id = b.as_buffer_id();
-                    if (a.type() == ValueType::STRING_ID) {
-                        uint32_t new_buf = buffers_.create_from_ids(a.as_string_id(), buf_id, strings_);
-                        push(Value::buffer_id(new_buf));
-                    } else {
-                        uint32_t new_buf = buffers_.create_from_two(str_a, buffers_.get_buffer(buf_id));
-                        push(Value::buffer_id(new_buf));
-                    }
-                } else if (a.type() == ValueType::STRING_ID) {
-                    uint32_t left_id = a.as_string_id();
-                    uint32_t new_id = left_id;
-                    if (b.type() == ValueType::STRING_ID) {
-                        new_id = strings_.append_id_to_interned(left_id, b.as_string_id());
-                    } else {
-                        new_id = strings_.append_to_interned(left_id, str_b);
-                    }
-                    if (new_id == left_id) {
-                        push(Value::string_id(new_id));
-                    } else {
-                        uint32_t buf = buffers_.create_from_ids(left_id, (b.type() == ValueType::STRING_ID) ? b.as_string_id() : 0, strings_);
-                        if (b.type() != ValueType::STRING_ID) {
-                            buffers_.append_literal(buf, str_b);
-                        }
-                        push(Value::buffer_id(buf));
-                        bytes_allocated_since_gc_ += buffers_.get_buffer(buf).length();
-                    }
-                } else {
-                    uint32_t buf = buffers_.create_from_two(str_a, str_b);
+                // Fast path: both are string IDs - create buffer directly
+                if (a.is_string_id() && b.is_string_id()) {
+                    uint32_t buf = buffers_.create_from_ids(a.as_string_id(), b.as_string_id(), strings_);
                     push(Value::buffer_id(buf));
                     bytes_allocated_since_gc_ += buffers_.get_buffer(buf).length();
+                    break;
                 }
+                
+                // One is a buffer - reuse it (massive performance boost for chained concat)
+                if (a.type() == ValueType::STRING_BUFFER) {
+                    uint32_t buf_id = a.as_buffer_id();
+                    if (b.is_string_id()) {
+                        buffers_.append_id(buf_id, b.as_string_id(), strings_);
+                    } else {
+                        buffers_.append_literal(buf_id, value_to_string(b));
+                    }
+                    push(Value::buffer_id(buf_id));
+                    bytes_allocated_since_gc_ += 32; // Approximate allocation for append
+                    break;
+                }
+                
+                std::string str_a = value_to_string(a);
+                std::string str_b = value_to_string(b);
+                uint32_t buf = buffers_.create_from_two(str_a, str_b);
+                buffers_.reserve(buf, str_a.length() + str_b.length() + 64);
+                push(Value::buffer_id(buf));
+                bytes_allocated_since_gc_ += buffers_.get_buffer(buf).length();
 
                 if (bytes_allocated_since_gc_ > GC_THRESHOLD) {
                     collect_garbage(&chunk);
@@ -511,48 +453,16 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
                 if (func_index >= 0) {
                     const Chunk& fchunk = chunk.get_function(static_cast<size_t>(func_index));
 
-                    // Set function parameters as globals
-                    const std::vector<std::string>& param_names = chunk.get_function_param_names(static_cast<size_t>(func_index));
-
-                    // Save current parameter values
-                    std::vector<Value> saved_param_values;
-                    std::vector<bool> had_saved_params;
-
-                    for (size_t i = 0; i < param_names.size(); ++i) {
-                        const std::string& param_name = param_names[i];
-
-                        // Save current value if it exists
-                        auto global_it = globals_.find(param_name);
-                        if (global_it != globals_.end()) {
-                            saved_param_values.push_back(global_it->second);
-                            had_saved_params.push_back(true);
-                        } else {
-                            saved_param_values.push_back(Value::nil());
-                            had_saved_params.push_back(false);
-                        }
-
-                        // Set parameter value
-                        if (i < tmp_args_.size()) {
-                            set_global(param_name, tmp_args_[i]);
-                        } else {
-                            set_global(param_name, Value::nil());
-                        }
-                    }
+                    // Use param stack/local frames instead of globals
+                    const std::vector<std::string>& locals_combined = chunk.get_function_local_names(static_cast<size_t>(func_index));
+                    push_local_frame(locals_combined, tmp_args_);
 
                     // Save current stack state
                     Value* saved_stack_top = stack_top_;
 
                     VMResult r = execute(fchunk, &chunk);
 
-                    // Restore parameter values
-                    for (size_t i = 0; i < param_names.size(); ++i) {
-                        const std::string& param_name = param_names[i];
-                        if (had_saved_params[i]) {
-                            set_global(param_name, saved_param_values[i]);
-                        } else {
-                            globals_.erase(param_name);
-                        }
-                    }
+                    pop_local_frame();
 
                     if (r != VMResult::OK) return r;
 
@@ -576,30 +486,8 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
                         const Chunk& fchunk = parent_chunk->get_function(static_cast<size_t>(parent_func_index));
 
                         // Set function parameters as globals  
-                        const std::vector<std::string>& param_names = parent_chunk->get_function_param_names(static_cast<size_t>(parent_func_index));
-
-                        std::vector<Value> saved_param_values;
-                        std::vector<bool> had_saved_params;
-
-                        for (size_t i = 0; i < param_names.size(); ++i) {
-                            const std::string& param_name = param_names[i];
-
-                            // Save current value if it exists
-                            auto global_it = globals_.find(param_name);
-                            if (global_it != globals_.end()) {
-                                saved_param_values.push_back(global_it->second);
-                                had_saved_params.push_back(true);
-                            } else {
-                                saved_param_values.push_back(Value::nil());
-                                had_saved_params.push_back(false);
-                            }
-
-                            if (i < tmp_args_.size()) {
-                                set_global(param_name, tmp_args_[i]);
-                            } else {
-                                set_global(param_name, Value::nil());
-                            }
-                        }
+                        const std::vector<std::string>& locals_combined = parent_chunk->get_function_local_names(static_cast<size_t>(parent_func_index));
+                        push_local_frame(locals_combined, tmp_args_);
 
                         // Save current stack state
                         Value* saved_stack_top = stack_top_;
@@ -607,15 +495,7 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
                         // Execute function chunk pass parent chunk as parent for recursive lookups
                         VMResult r = execute(fchunk, parent_chunk);
 
-                        // Restore parameter values
-                        for (size_t i = 0; i < param_names.size(); ++i) {
-                            const std::string& param_name = param_names[i];
-                            if (had_saved_params[i]) {
-                                set_global(param_name, saved_param_values[i]);
-                            } else {
-                                globals_.erase(param_name);
-                            }
-                        }
+                        pop_local_frame();
 
                         if (r != VMResult::OK) return r;
 
@@ -669,19 +549,11 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
 
                 ssize_t func_index = chunk.get_function_index(func_name_lc);
                 if (func_index >= 0) {
-                    const std::vector<std::string>& param_names = chunk.get_function_param_names(static_cast<size_t>(func_index));
-                    
-                    for (size_t i = 0; i < param_names.size(); ++i) {
-                        const std::string& param_name = param_names[i];
-                        if (i < tmp_args_.size()) {
-                        set_global(param_name, tmp_args_[i]);
-                        } else {
-                            set_global(param_name, Value::nil());
-                        }
-                    }
-                    
-                    // Reset instruction pointer to start of current function
-                    // This creates a loop instead of recursion eliminating stack growth
+                    const std::vector<std::string>& locals_combined = chunk.get_function_local_names(static_cast<size_t>(func_index));
+
+                    if (!local_frames_.empty()) pop_local_frame();
+                    push_local_frame(locals_combined, tmp_args_);
+
                     ip = chunk.code().data();
                     continue; // Restart execution from the beginning
                 }
@@ -707,8 +579,29 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
                 }
                 
                 std::string var_name = strings_.get_string(variable_name.as_string_id());
-                Value value = get_global(var_name);
-                push(value);
+                Value local_val;
+                if (local_lookup(var_name, local_val)) {
+                    push(local_val);
+                } else {
+                    Value value = get_global(var_name);
+                    push(value);
+                }
+                break;
+            }
+
+            case OpCode::OP_GET_LOCAL: {
+                uint8_t idx = read_byte(ip);
+                if (local_frame_bases_.empty()) {
+                    runtime_error("No local frame for GET_LOCAL");
+                    return VMResult::RUNTIME_ERROR;
+                }
+                size_t base = local_frame_bases_.back();
+                size_t abs = base + static_cast<size_t>(idx);
+                if (abs >= param_stack_.size()) {
+                    runtime_error("Local index out of range");
+                    return VMResult::RUNTIME_ERROR;
+                }
+                push(param_stack_[abs]);
                 break;
             }
             
@@ -721,7 +614,33 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
                 
                 std::string var_name = strings_.get_string(variable_name.as_string_id());
                 Value value = peek(); // Don't pop - assignment is an expression
+                if (!local_frames_.empty()) {
+                    const auto& frame = local_frames_.back();
+                    auto it = frame.find(var_name);
+                    if (it != frame.end()) {
+                        size_t idx = it->second;
+                        if (idx < param_stack_.size()) param_stack_[idx] = value;
+                        break;
+                    }
+                }
                 set_global(var_name, value);
+                break;
+            }
+
+            case OpCode::OP_SET_LOCAL: {
+                uint8_t idx = read_byte(ip);
+                if (local_frame_bases_.empty()) {
+                    runtime_error("No local frame for SET_LOCAL");
+                    return VMResult::RUNTIME_ERROR;
+                }
+                size_t base = local_frame_bases_.back();
+                size_t abs = base + static_cast<size_t>(idx);
+                Value value = peek(); // assignment is an expression
+                if (abs >= param_stack_.size()) {
+                    runtime_error("Local index out of range for SET_LOCAL");
+                    return VMResult::RUNTIME_ERROR;
+                }
+                param_stack_[abs] = value;
                 break;
             }
             
@@ -749,6 +668,43 @@ uint8_t VM::read_byte(const uint8_t*& ip) {
 Value VM::read_constant(const Chunk& chunk, const uint8_t*& ip) {
     uint8_t index = read_byte(ip);
     return chunk.get_constant(index);
+}
+
+void VM::push_local_frame(const std::vector<std::string>& locals_combined, const std::vector<Value>& args) {
+    size_t base = param_stack_.size();
+    local_frame_bases_.push_back(base);
+
+    std::unordered_map<std::string, size_t> frame_map;
+    for (size_t i = 0; i < locals_combined.size(); ++i) {
+        Value v = (i < args.size()) ? args[i] : Value::nil();
+        param_stack_.push_back(v);
+        frame_map[locals_combined[i]] = base + i;
+    }
+    local_frames_.push_back(std::move(frame_map));
+}
+
+void VM::pop_local_frame() {
+    if (local_frame_bases_.empty()) return;
+    size_t base = local_frame_bases_.back();
+    local_frame_bases_.pop_back();
+
+    // remove values from param_stack_
+    if (base <= param_stack_.size()) {
+        param_stack_.resize(base);
+    }
+
+    if (!local_frames_.empty()) local_frames_.pop_back();
+}
+
+bool VM::local_lookup(const std::string& name, Value& out) const {
+    if (local_frames_.empty()) return false;
+    const auto& frame = local_frames_.back();
+    auto it = frame.find(name);
+    if (it == frame.end()) return false;
+    size_t idx = it->second;
+    if (idx >= param_stack_.size()) return false;
+    out = param_stack_[idx];
+    return true;
 }
 
 bool VM::binary_op(OpCode op) {
@@ -932,14 +888,37 @@ void VM::mark_reachable_strings(const Chunk* active_chunk) {
                 strings_.mark_string_reachable(constant.as_string_id());
             }
         }
-
-        // Also mark nested function names/constants
         for (size_t i = 0; i < active_chunk->function_count(); ++i) {
             const Chunk& f = active_chunk->get_function(i);
             for (const auto& c : f.constants()) {
                 if (c.type() == ValueType::STRING_ID) strings_.mark_string_reachable(c.as_string_id());
             }
         }
+    }
+}
+
+std::string VM::value_to_string(const Value& val) {
+    switch (val.type()) {
+        case ValueType::STRING_ID: 
+            return strings_.get_string(val.as_string_id());
+        case ValueType::INT: {
+            char buf[32];
+            auto res = std::to_chars(buf, buf + sizeof(buf), val.as_integer());
+            return std::string(buf, res.ptr);
+        }
+        case ValueType::FLOAT: {
+            char buf[64];
+            snprintf(buf, sizeof(buf), "%g", val.as_floating());
+            return buf;
+        }
+        case ValueType::BOOL: 
+            return val.as_boolean() ? "true" : "false";
+        case ValueType::NIL: 
+            return "nil";
+        case ValueType::STRING_BUFFER:
+            return buffers_.get_buffer(val.as_buffer_id());
+        default: 
+            return "unknown";
     }
 }
 

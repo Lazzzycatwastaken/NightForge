@@ -199,8 +199,10 @@ public:
     const std::vector<int>& lines() const { return lines_; }
     // User-defined functions stored with the chunk
     size_t add_function(const Chunk& function_chunk, const std::vector<std::string>& param_names, const std::string& function_name);
+    size_t add_function(const Chunk& function_chunk, const std::vector<std::string>& param_names, const std::vector<std::string>& local_names, const std::string& function_name);
     const Chunk& get_function(size_t index) const;
     const std::vector<std::string>& get_function_param_names(size_t index) const;
+    const std::vector<std::string>& get_function_local_names(size_t index) const;
     ssize_t get_function_index(const std::string& name) const;
     size_t function_count() const;
     const std::string& function_name(size_t index) const;
@@ -216,6 +218,7 @@ private:
     // user functions
     std::vector<Chunk> functions_;
     std::vector<std::vector<std::string>> function_params_; // changed to vector of vectors
+    std::vector<std::vector<std::string>> function_locals_; // local variable names per function
     std::vector<std::string> function_names_;
 };
 
