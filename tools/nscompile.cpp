@@ -93,8 +93,6 @@ int main(int argc, char** argv) {
     std::cout << "  Source:       " << source_size << " bytes" << std::endl;
     std::cout << "  Bytecode:     " << bytecode_size << " bytes" << std::endl;
     std::cout << "  Compression:  " << (100.0 * bytecode_size / source_size) << "%" << std::endl;
-    std::cout << "" << std::endl;
-    std::cout << "Next run will be 50-100x faster! 🚀" << std::endl;
-    
+    std::cout << "" << std::endl;    
     return 0;
 }
