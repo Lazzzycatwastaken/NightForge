@@ -37,14 +37,19 @@ VMResult VM::execute(const Chunk& chunk, const Chunk* parent_chunk) {
 
 void VM::set_global(const std::string& name, const Value& value) {
     globals_[name] = value;
+    uint32_t id = strings_.find_id(name);
+    if (id != 0xFFFFFFFFu) globals_by_id_[id] = value;
 }
 
 Value VM::get_global(const std::string& name) {
-    auto it = globals_.find(name);
-    if (it != globals_.end()) {
-        return it->second;
+    uint32_t id = strings_.find_id(name);
+    if (id != 0xFFFFFFFFu) {
+        auto it2 = globals_by_id_.find(id);
+        if (it2 != globals_by_id_.end()) return it2->second;
     }
-    return Value::nil(); // undefined global
+    auto it = globals_.find(name);
+    if (it != globals_.end()) return it->second;
+    return Value::nil();
 }
 
 void VM::print_stack() {
@@ -118,7 +123,9 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
             return VMResult::RUNTIME_ERROR;
         }
         
-        uint8_t instruction = read_byte(ip);
+    const uint8_t* ip_before = ip;
+    uint8_t instruction = read_byte(ip);
+    stats.op_counts[instruction]++;
         
 #ifdef DEBUG_TRACE_EXECUTION
         print_stack();
@@ -416,6 +423,143 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
                 std::cout << " ";  // space instead of newline
                 break;
             }
+
+            case OpCode::OP_CONSTANT_R: {
+                uint8_t dest = read_byte(ip);
+                uint8_t idx = read_byte(ip);
+                Value constant = chunk.get_constant(idx);
+                if (dest < REG_COUNT) registers_[dest] = constant;
+                break;
+            }
+
+            case OpCode::OP_GET_LOCAL_R: {
+                uint8_t dest = read_byte(ip);
+                uint8_t idx = read_byte(ip);
+                if (local_frame_bases_.empty()) {
+                    runtime_error("No local frame for GET_LOCAL_R");
+                    return VMResult::RUNTIME_ERROR;
+                }
+                size_t base = local_frame_bases_.back();
+                size_t abs = base + static_cast<size_t>(idx);
+                if (abs >= param_stack_.size()) {
+                    runtime_error("Local index out of range for GET_LOCAL_R");
+                    return VMResult::RUNTIME_ERROR;
+                }
+                if (dest < REG_COUNT) registers_[dest] = param_stack_[abs];
+                break;
+            }
+
+            case OpCode::OP_PUSH_REG: {
+                uint8_t reg = read_byte(ip);
+                if (reg >= REG_COUNT) {
+                    runtime_error("Invalid register in PUSH_REG");
+                    return VMResult::RUNTIME_ERROR;
+                }
+                push(registers_[reg]);
+                break;
+            }
+
+            case OpCode::OP_ADD_INT_R: {
+                uint8_t dest = read_byte(ip);
+                uint8_t s1 = read_byte(ip);
+                uint8_t s2 = read_byte(ip);
+                int64_t a = registers_[s1].as_integer();
+                int64_t b = registers_[s2].as_integer();
+                if (dest < REG_COUNT) registers_[dest] = Value::integer(a + b);
+                break;
+            }
+
+            case OpCode::OP_ADD_FLOAT_R: {
+                uint8_t dest = read_byte(ip);
+                uint8_t s1 = read_byte(ip);
+                uint8_t s2 = read_byte(ip);
+                double a = registers_[s1].as_floating();
+                double b = registers_[s2].as_floating();
+                if (dest < REG_COUNT) registers_[dest] = Value::floating(a + b);
+                break;
+            }
+
+            case OpCode::OP_ADD_STRING_R: {
+                uint8_t dest = read_byte(ip);
+                uint8_t s1 = read_byte(ip);
+                uint8_t s2 = read_byte(ip);
+                // Build buffer from two register values
+                std::string sa = value_to_string(registers_[s1]);
+                std::string sb = value_to_string(registers_[s2]);
+                uint32_t buf = buffers_.create_from_two(sa, sb);
+                if (dest < REG_COUNT) registers_[dest] = Value::buffer_id(buf);
+                bytes_allocated_since_gc_ += buffers_.get_buffer(buf).length();
+                break;
+            }
+
+            case OpCode::OP_ADD_LOCAL: {
+                uint8_t idx_a = read_byte(ip);
+                uint8_t idx_b = read_byte(ip);
+                if (local_frame_bases_.empty()) {
+                    runtime_error("No local frame for OP_ADD_LOCAL");
+                    return VMResult::RUNTIME_ERROR;
+                }
+                size_t base = local_frame_bases_.back();
+                size_t abs_a = base + static_cast<size_t>(idx_a);
+                size_t abs_b = base + static_cast<size_t>(idx_b);
+                if (abs_a >= param_stack_.size() || abs_b >= param_stack_.size()) {
+                    runtime_error("Local index out of range for OP_ADD_LOCAL");
+                    return VMResult::RUNTIME_ERROR;
+                }
+                Value a = param_stack_[abs_a];
+                Value b = param_stack_[abs_b];
+                if (a.type() == ValueType::INT && b.type() == ValueType::INT) {
+                    push(Value::integer(a.as_integer() + b.as_integer()));
+                } else {
+                    // Fallback to numeric addition semantics
+                    double da = (a.type() == ValueType::FLOAT) ? a.as_floating() : static_cast<double>(a.as_integer());
+                    double db = (b.type() == ValueType::FLOAT) ? b.as_floating() : static_cast<double>(b.as_integer());
+                    push(Value::floating(da + db));
+                }
+                break;
+            }
+
+            case OpCode::OP_ADD_FLOAT_LOCAL: {
+                uint8_t idx_a = read_byte(ip);
+                uint8_t idx_b = read_byte(ip);
+                if (local_frame_bases_.empty()) {
+                    runtime_error("No local frame for OP_ADD_FLOAT_LOCAL");
+                    return VMResult::RUNTIME_ERROR;
+                }
+                size_t base = local_frame_bases_.back();
+                size_t abs_a = base + static_cast<size_t>(idx_a);
+                size_t abs_b = base + static_cast<size_t>(idx_b);
+                if (abs_a >= param_stack_.size() || abs_b >= param_stack_.size()) {
+                    runtime_error("Local index out of range for OP_ADD_FLOAT_LOCAL");
+                    return VMResult::RUNTIME_ERROR;
+                }
+                double da = (param_stack_[abs_a].type() == ValueType::FLOAT) ? param_stack_[abs_a].as_floating() : static_cast<double>(param_stack_[abs_a].as_integer());
+                double db = (param_stack_[abs_b].type() == ValueType::FLOAT) ? param_stack_[abs_b].as_floating() : static_cast<double>(param_stack_[abs_b].as_integer());
+                push(Value::floating(da + db));
+                break;
+            }
+
+            case OpCode::OP_ADD_STRING_LOCAL: {
+                uint8_t idx_a = read_byte(ip);
+                uint8_t idx_b = read_byte(ip);
+                if (local_frame_bases_.empty()) {
+                    runtime_error("No local frame for OP_ADD_STRING_LOCAL");
+                    return VMResult::RUNTIME_ERROR;
+                }
+                size_t base = local_frame_bases_.back();
+                size_t abs_a = base + static_cast<size_t>(idx_a);
+                size_t abs_b = base + static_cast<size_t>(idx_b);
+                if (abs_a >= param_stack_.size() || abs_b >= param_stack_.size()) {
+                    runtime_error("Local index out of range for OP_ADD_STRING_LOCAL");
+                    return VMResult::RUNTIME_ERROR;
+                }
+                std::string sa = value_to_string(param_stack_[abs_a]);
+                std::string sb = value_to_string(param_stack_[abs_b]);
+                uint32_t buf = buffers_.create_from_two(sa, sb);
+                push(Value::buffer_id(buf));
+                bytes_allocated_since_gc_ += buffers_.get_buffer(buf).length();
+                break;
+            }
             
             case OpCode::OP_CALL_HOST: {
                 Value function_name = read_constant(chunk, ip);
@@ -577,14 +721,20 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
                     runtime_error("Expected variable name");
                     return VMResult::RUNTIME_ERROR;
                 }
-                
-                std::string var_name = strings_.get_string(variable_name.as_string_id());
+
+                uint32_t sid = variable_name.as_string_id();
+                std::string var_name = strings_.get_string(sid);
                 Value local_val;
                 if (local_lookup(var_name, local_val)) {
                     push(local_val);
                 } else {
-                    Value value = get_global(var_name);
-                    push(value);
+                    auto it = globals_by_id_.find(sid);
+                    if (it != globals_by_id_.end()) {
+                        push(it->second);
+                    } else {
+                        Value value = get_global(var_name);
+                        push(value);
+                    }
                 }
                 break;
             }
@@ -611,8 +761,9 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
                     runtime_error("Expected variable name");
                     return VMResult::RUNTIME_ERROR;
                 }
-                
-                std::string var_name = strings_.get_string(variable_name.as_string_id());
+
+                uint32_t sid = variable_name.as_string_id();
+                std::string var_name = strings_.get_string(sid);
                 Value value = peek(); // Don't pop - assignment is an expression
                 if (!local_frames_.empty()) {
                     const auto& frame = local_frames_.back();
@@ -623,7 +774,8 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
                         break;
                     }
                 }
-                set_global(var_name, value);
+                globals_by_id_[sid] = value;
+                globals_[var_name] = value;
                 break;
             }
 

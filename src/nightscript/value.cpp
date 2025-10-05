@@ -112,6 +112,12 @@ uint32_t StringTable::intern(const std::string& str) {
     return id;
 }
 
+uint32_t StringTable::find_id(const std::string& str) const {
+    auto it = string_to_id_.find(str);
+    if (it == string_to_id_.end()) return 0xFFFFFFFFu;
+    return it->second;
+}
+
 const std::string& StringTable::get_string(uint32_t id) const {
     static const std::string empty_string = "";
     

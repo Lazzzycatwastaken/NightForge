@@ -265,6 +265,19 @@ void Engine::execute_script_file(const std::string& filename) {
             break;
     }
     
+    std::vector<std::pair<int,uint64_t>> ops;
+    for (int i = 0; i < 256; ++i) {
+        uint64_t c = vm_->stats.op_counts[i];
+        if (c > 0) ops.emplace_back(i, c);
+    }
+    std::sort(ops.begin(), ops.end(), [](const auto &a, const auto &b){ return a.second > b.second; });
+    std::cout << "--- Opcode hotspots ---" << std::endl;
+    int printed = 0;
+    for (auto &p : ops) {
+        std::cout << "op=" << p.first << " count=" << p.second << std::endl;
+        if (++printed >= 10) break;
+    }
+
     std::cout << "=== Script Complete ===" << std::endl;
 }
 

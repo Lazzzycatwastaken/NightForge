@@ -60,6 +60,7 @@ public:
         size_t bytes_allocated = 0;
         size_t bytes_freed = 0;
         double total_gc_time = 0.0;
+        std::array<uint64_t, 256> op_counts = {};
     } stats;
     
 private:
@@ -88,6 +89,7 @@ private:
     Value* stack_top_;
     
     std::unordered_map<std::string, Value> globals_;
+    std::unordered_map<uint32_t, Value> globals_by_id_; // fast path for interned globals
     // host functions are provided via HostEnvironment (host_env_)
     StringTable strings_;
     BufferTable buffers_;
@@ -111,7 +113,10 @@ private:
     Value pop();
     Value peek(int distance = 0);
     void reset_stack();
-    
+
+    static constexpr size_t REG_COUNT = 256;
+    Value registers_[REG_COUNT];
+
     // Error state
     bool has_runtime_error_ = false;
     

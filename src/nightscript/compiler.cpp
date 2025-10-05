@@ -41,7 +41,44 @@ bool Compiler::compile(const std::string& source, Chunk& chunk, StringTable& str
     }
     
     emit_return();
+    thread_jumps();
+    lower_stack_to_registers();
     return !had_error_;
+}
+
+void Compiler::lower_stack_to_registers() {
+    const auto& src = chunk_->code();
+    std::vector<uint8_t> out;
+    size_t i = 0;
+    uint8_t next_reg = 0;
+    while (i < src.size()) {
+        uint8_t op = src[i];
+        if (i + 4 < src.size() && src[i] == static_cast<uint8_t>(OpCode::OP_GET_LOCAL) && src[i+2] == static_cast<uint8_t>(OpCode::OP_GET_LOCAL)) {
+            uint8_t idx_a = src[i+1];
+            uint8_t idx_b = src[i+3];
+            uint8_t add_op = src[i+4];
+            bool handled = false;
+
+            if (add_op == static_cast<uint8_t>(OpCode::OP_ADD_INT)) {
+                out.push_back(static_cast<uint8_t>(OpCode::OP_ADD_LOCAL)); out.push_back(idx_a); out.push_back(idx_b);
+                i += 5; handled = true;
+            } else if (add_op == static_cast<uint8_t>(OpCode::OP_ADD_FLOAT)) {
+                out.push_back(static_cast<uint8_t>(OpCode::OP_ADD_FLOAT_LOCAL)); out.push_back(idx_a); out.push_back(idx_b);
+                i += 5; handled = true;
+            } else if (add_op == static_cast<uint8_t>(OpCode::OP_ADD_STRING)) {
+                out.push_back(static_cast<uint8_t>(OpCode::OP_ADD_STRING_LOCAL)); out.push_back(idx_a); out.push_back(idx_b);
+                i += 5; handled = true;
+            }
+
+            if (handled) continue;
+        }
+
+        out.push_back(src[i]);
+        ++i;
+    }
+
+    auto& code_mut = const_cast<std::vector<uint8_t>&>(chunk_->code());
+    code_mut = std::move(out);
 }
 
 Token Compiler::current_token() {
@@ -716,6 +753,40 @@ void Compiler::emit_constant(const Value& value) {
 
 void Compiler::emit_return() {
     emit_byte(static_cast<uint8_t>(OpCode::OP_RETURN));
+}
+
+void Compiler::thread_jumps() {
+    const auto& code = chunk_->code();
+    size_t n = code.size();
+    for (size_t i = 0; i + 1 < n; ++i) {
+        uint8_t instr = code[i];
+        if (instr != static_cast<uint8_t>(OpCode::OP_JUMP) && instr != static_cast<uint8_t>(OpCode::OP_JUMP_IF_FALSE)) continue;
+
+        size_t offset_idx = i + 1;
+        if (offset_idx >= n) continue;
+        uint8_t off = code[offset_idx];
+        size_t dest = offset_idx + static_cast<size_t>(off);
+
+        // Follow unconditional jump chains only (safe)
+        int follow = 0;
+        while (dest < n && follow < 32) {
+            uint8_t at = code[dest];
+            if (at != static_cast<uint8_t>(OpCode::OP_JUMP)) break;
+            // read the next jump's offset
+            if (dest + 1 >= n) break;
+            uint8_t next_off = code[dest + 1];
+            size_t next_dest = dest + 1 + static_cast<size_t>(next_off);
+            if (next_dest == dest) break; // degenerate
+            dest = next_dest;
+            ++follow;
+        }
+
+        if (dest >= n) dest = n - 1; // clamp
+        // compute new offset relative to the original offset byte
+        size_t new_off_sz = dest - offset_idx;
+        uint8_t new_off = (new_off_sz > 255) ? 255 : static_cast<uint8_t>(new_off_sz);
+        chunk_->patch_byte(offset_idx, new_off);
+    }
 }
 
 void Compiler::error(const char* message) {

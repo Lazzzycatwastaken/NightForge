@@ -96,6 +96,9 @@ private:
     void emit_bytes(uint8_t byte1, uint8_t byte2);
     void emit_constant(const Value& value);
     void emit_return();
+
+    void thread_jumps();
+    void lower_stack_to_registers();
     
     // Error handling
     void error(const char* message);
