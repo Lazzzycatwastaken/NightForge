@@ -881,6 +881,65 @@ void Compiler::emit_optimized_binary_op(TokenType op, InferredType left_type, In
         stats_.generic_ops_emitted++;
     }
     
+    //Const folding for constant expressions
+    const auto& code = chunk_->code();
+    if (code.size() >= 4) {
+        size_t n = code.size();
+        uint8_t last3 = code[n-4];
+        uint8_t last2 = code[n-3];
+        uint8_t last1 = code[n-2];
+        uint8_t last0 = code[n-1];
+        if (static_cast<OpCode>(last3) == OpCode::OP_CONSTANT && static_cast<OpCode>(last1) == OpCode::OP_CONSTANT) {
+            uint8_t idx_a = last2;
+            uint8_t idx_b = last0;
+            Value a = chunk_->get_constant(idx_a);
+            Value b = chunk_->get_constant(idx_b);
+            bool foldable = false;
+            Value result = Value::nil();
+            if ((op == TokenType::PLUS || op == TokenType::MINUS || op == TokenType::MULTIPLY || op == TokenType::DIVIDE || op == TokenType::MODULO)) {
+                if ((a.type() == ValueType::INT || a.type() == ValueType::FLOAT) && (b.type() == ValueType::INT || b.type() == ValueType::FLOAT)) {
+                    double da = (a.type() == ValueType::FLOAT) ? a.as_floating() : static_cast<double>(a.as_integer());
+                    double db = (b.type() == ValueType::FLOAT) ? b.as_floating() : static_cast<double>(b.as_integer());
+                    double r = 0.0;
+                    switch (op) {
+                        case TokenType::PLUS: r = da + db; break;
+                        case TokenType::MINUS: r = da - db; break;
+                        case TokenType::MULTIPLY: r = da * db; break;
+                        case TokenType::DIVIDE: r = da / db; break;
+                        case TokenType::MODULO: {
+                            if (a.type() == ValueType::INT && b.type() == ValueType::INT) {
+                                int64_t ri = a.as_integer() % b.as_integer();
+                                result = Value::integer(ri);
+                                foldable = true;
+                            }
+                            break;
+                        }
+                        default: break;
+                    }
+                    if (!foldable) {
+                        if (a.type() == ValueType::FLOAT || b.type() == ValueType::FLOAT) {
+                            result = Value::floating(r);
+                            foldable = true;
+                        } else {
+                            int64_t ri = static_cast<int64_t>(r);
+                            result = Value::integer(ri);
+                            foldable = true;
+                        }
+                    }
+                }
+            }
+
+            if (foldable) {
+                for (int i = 0; i < 4; ++i) chunk_->patch_byte(chunk_->code_size() - 4 + i, 0);
+                auto& code_mut = const_cast<std::vector<uint8_t>&>(chunk_->code());
+                code_mut.resize(code_mut.size() - 4);
+                emit_constant(result);
+                stats_.constant_folds++;
+                return;
+            }
+        }
+    }
+
     emit_byte(static_cast<uint8_t>(specialized_op));
 }
 

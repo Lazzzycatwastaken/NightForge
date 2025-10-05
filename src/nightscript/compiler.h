@@ -41,6 +41,7 @@ private:
         size_t specialized_ops_emitted = 0;
         size_t generic_ops_emitted = 0;
         size_t tail_calls_optimized = 0;
+        size_t constant_folds = 0;
     } stats_;
     
     // Parser state
