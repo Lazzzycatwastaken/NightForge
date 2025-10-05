@@ -20,7 +20,6 @@ int main(int argc, char** argv) {
         std::cout << "Usage: nscompile <script.ns>" << std::endl;
         std::cout << "Output: <script.ns.nsc>" << std::endl;
         std::cout << "" << std::endl;
-        std::cout << "Performance: 50-100x faster loading after compilation!" << std::endl;
         return 0;
     }
     
