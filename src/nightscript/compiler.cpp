@@ -1068,6 +1068,18 @@ bool Compiler::load_cached_bytecode(const std::string& source_path, Chunk& chunk
                 param_names.push_back(pname);
             }
 
+            // lol i forgor
+            uint32_t local_count = 0;
+            cache_file.read(reinterpret_cast<char*>(&local_count), sizeof(local_count));
+            std::vector<std::string> local_names;
+            for (uint32_t li = 0; li < local_count; ++li) {
+                uint32_t llen;
+                cache_file.read(reinterpret_cast<char*>(&llen), sizeof(llen));
+                std::string lname(llen, '\0');
+                cache_file.read(&lname[0], llen);
+                local_names.push_back(lname);
+            }
+
             // Function constants
             uint32_t fconst_count;
             cache_file.read(reinterpret_cast<char*>(&fconst_count), sizeof(fconst_count));
@@ -1104,18 +1116,6 @@ bool Compiler::load_cached_bytecode(const std::string& source_path, Chunk& chunk
                     default:
                         return false;
                 }
-            }
-
-            // Locals (read combined locals stored by compiler)
-            uint32_t local_count = 0;
-            cache_file.read(reinterpret_cast<char*>(&local_count), sizeof(local_count));
-            std::vector<std::string> local_names;
-            for (uint32_t li = 0; li < local_count; ++li) {
-                uint32_t llen;
-                cache_file.read(reinterpret_cast<char*>(&llen), sizeof(llen));
-                std::string lname(llen, '\0');
-                cache_file.read(&lname[0], llen);
-                local_names.push_back(lname);
             }
 
             // Function code
