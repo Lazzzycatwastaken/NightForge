@@ -20,7 +20,6 @@ int main(int argc, char** argv) {
         std::cout << "Usage: nscompile <script.ns>" << std::endl;
         std::cout << "Output: <script.ns.nsc>" << std::endl;
         std::cout << "" << std::endl;
-        std::cout << "Performance: 50-100x faster loading after compilation!" << std::endl;
         return 0;
     }
     
@@ -93,8 +92,6 @@ int main(int argc, char** argv) {
     std::cout << "  Source:       " << source_size << " bytes" << std::endl;
     std::cout << "  Bytecode:     " << bytecode_size << " bytes" << std::endl;
     std::cout << "  Compression:  " << (100.0 * bytecode_size / source_size) << "%" << std::endl;
-    std::cout << "" << std::endl;
-    std::cout << "Next run will be 50-100x faster! 🚀" << std::endl;
-    
+    std::cout << "" << std::endl;    
     return 0;
 }
