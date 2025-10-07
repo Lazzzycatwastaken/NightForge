@@ -213,6 +213,89 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
                 }
                 break;
             }
+
+            case OpCode::OP_ADD_LOCAL_CONST: {
+                uint8_t idx_a = read_byte(ip);
+                Value vc = read_constant(chunk, ip);
+                if (local_frame_bases_.empty()) {
+                    runtime_error("No local frame for OP_ADD_LOCAL_CONST");
+                    return VMResult::RUNTIME_ERROR;
+                }
+                size_t base = local_frame_bases_.back();
+                size_t abs_a = base + static_cast<size_t>(idx_a);
+                if (abs_a >= param_stack_.size()) {
+                    runtime_error("Local index out of range for OP_ADD_LOCAL_CONST");
+                    return VMResult::RUNTIME_ERROR;
+                }
+                Value va = param_stack_[abs_a];
+                if (va.type() == ValueType::INT && vc.type() == ValueType::INT) {
+                    push(Value::integer(va.as_integer() + vc.as_integer()));
+                } else if (va.type() == ValueType::FLOAT || vc.type() == ValueType::FLOAT) {
+                    double da = (va.type() == ValueType::FLOAT) ? va.as_floating() : static_cast<double>(va.as_integer());
+                    double dc = (vc.type() == ValueType::FLOAT) ? vc.as_floating() : static_cast<double>(vc.as_integer());
+                    push(Value::floating(da + dc));
+                } else if (va.type() == ValueType::STRING_ID || vc.type() == ValueType::STRING_ID || va.type() == ValueType::STRING_BUFFER || vc.type() == ValueType::STRING_BUFFER) {
+                    std::string sa = value_to_string(va);
+                    std::string sc = value_to_string(vc);
+                    uint32_t buf = buffers_.create_from_two(sa, sc);
+                    push(Value::buffer_id(buf));
+                    bytes_allocated_since_gc_ += buffers_.get_buffer(buf).length();
+                } else {
+                    runtime_error("ADD_LOCAL_CONST unsupported types");
+                    return VMResult::RUNTIME_ERROR;
+                }
+                break;
+            }
+
+            case OpCode::OP_ADD_CONST_LOCAL: {
+                // constant then local
+                Value vc = read_constant(chunk, ip);
+                uint8_t idx_a = read_byte(ip);
+                if (local_frame_bases_.empty()) {
+                    runtime_error("No local frame for OP_ADD_CONST_LOCAL");
+                    return VMResult::RUNTIME_ERROR;
+                }
+                size_t base = local_frame_bases_.back();
+                size_t abs_a = base + static_cast<size_t>(idx_a);
+                if (abs_a >= param_stack_.size()) {
+                    runtime_error("Local index out of range for OP_ADD_CONST_LOCAL");
+                    return VMResult::RUNTIME_ERROR;
+                }
+                Value va = param_stack_[abs_a];
+                if (va.type() == ValueType::INT && vc.type() == ValueType::INT) {
+                    push(Value::integer(vc.as_integer() + va.as_integer()));
+                } else if (va.type() == ValueType::FLOAT || vc.type() == ValueType::FLOAT) {
+                    double da = (va.type() == ValueType::FLOAT) ? va.as_floating() : static_cast<double>(va.as_integer());
+                    double dc = (vc.type() == ValueType::FLOAT) ? vc.as_floating() : static_cast<double>(vc.as_integer());
+                    push(Value::floating(dc + da));
+                } else if (va.type() == ValueType::STRING_ID || vc.type() == ValueType::STRING_ID || va.type() == ValueType::STRING_BUFFER || vc.type() == ValueType::STRING_BUFFER) {
+                    std::string sc = value_to_string(vc);
+                    std::string sa = value_to_string(va);
+                    uint32_t buf = buffers_.create_from_two(sc, sa);
+                    push(Value::buffer_id(buf));
+                    bytes_allocated_since_gc_ += buffers_.get_buffer(buf).length();
+                } else {
+                    runtime_error("ADD_CONST_LOCAL unsupported types");
+                    return VMResult::RUNTIME_ERROR;
+                }
+                break;
+            }
+
+            case OpCode::OP_CONSTANT_LOCAL: {
+                Value vc = read_constant(chunk, ip);
+                uint8_t local_idx = read_byte(ip);
+                if (local_frame_bases_.empty()) {
+                    runtime_error("CONSTANT_LOCAL with no frame");
+                    return VMResult::RUNTIME_ERROR;
+                }
+                size_t base = local_frame_bases_.back();
+                if (base + static_cast<size_t>(local_idx) >= param_stack_.size()) {
+                    runtime_error("CONSTANT_LOCAL local index OOB");
+                    return VMResult::RUNTIME_ERROR;
+                }
+                param_stack_[base + static_cast<size_t>(local_idx)] = vc;
+                break;
+            }
             
             case OpCode::OP_SUB_INT: {
                 Value b = pop();

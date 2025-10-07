@@ -53,24 +53,62 @@ void Compiler::lower_stack_to_registers() {
     uint8_t next_reg = 0;
     while (i < src.size()) {
         uint8_t op = src[i];
-        if (i + 4 < src.size() && src[i] == static_cast<uint8_t>(OpCode::OP_GET_LOCAL) && src[i+2] == static_cast<uint8_t>(OpCode::OP_GET_LOCAL)) {
-            uint8_t idx_a = src[i+1];
-            uint8_t idx_b = src[i+3];
-            uint8_t add_op = src[i+4];
-            bool handled = false;
+        if (i + 4 < src.size()) {
+            if (src[i] == static_cast<uint8_t>(OpCode::OP_GET_LOCAL) && src[i+2] == static_cast<uint8_t>(OpCode::OP_GET_LOCAL)) {
+                uint8_t idx_a = src[i+1];
+                uint8_t idx_b = src[i+3];
+                uint8_t add_op = src[i+4];
+                bool handled = false;
 
-            if (add_op == static_cast<uint8_t>(OpCode::OP_ADD_INT)) {
-                out.push_back(static_cast<uint8_t>(OpCode::OP_ADD_LOCAL)); out.push_back(idx_a); out.push_back(idx_b);
-                i += 5; handled = true;
-            } else if (add_op == static_cast<uint8_t>(OpCode::OP_ADD_FLOAT)) {
-                out.push_back(static_cast<uint8_t>(OpCode::OP_ADD_FLOAT_LOCAL)); out.push_back(idx_a); out.push_back(idx_b);
-                i += 5; handled = true;
-            } else if (add_op == static_cast<uint8_t>(OpCode::OP_ADD_STRING)) {
-                out.push_back(static_cast<uint8_t>(OpCode::OP_ADD_STRING_LOCAL)); out.push_back(idx_a); out.push_back(idx_b);
-                i += 5; handled = true;
+                if (add_op == static_cast<uint8_t>(OpCode::OP_ADD_INT)) {
+                    out.push_back(static_cast<uint8_t>(OpCode::OP_ADD_LOCAL)); out.push_back(idx_a); out.push_back(idx_b);
+                    i += 5; handled = true;
+                } else if (add_op == static_cast<uint8_t>(OpCode::OP_ADD_FLOAT)) {
+                    out.push_back(static_cast<uint8_t>(OpCode::OP_ADD_FLOAT_LOCAL)); out.push_back(idx_a); out.push_back(idx_b);
+                    i += 5; handled = true;
+                } else if (add_op == static_cast<uint8_t>(OpCode::OP_ADD_STRING)) {
+                    out.push_back(static_cast<uint8_t>(OpCode::OP_ADD_STRING_LOCAL)); out.push_back(idx_a); out.push_back(idx_b);
+                    i += 5; handled = true;
+                }
+
+                if (handled) continue;
             }
 
-            if (handled) continue;
+            if (src[i] == static_cast<uint8_t>(OpCode::OP_GET_LOCAL) && src[i+2] == static_cast<uint8_t>(OpCode::OP_CONSTANT)) {
+                uint8_t idx_a = src[i+1];
+                uint8_t const_idx = src[i+3];
+                uint8_t add_op = src[i+4];
+                bool handled = false;
+                if (add_op == static_cast<uint8_t>(OpCode::OP_ADD_INT)) {
+                    out.push_back(static_cast<uint8_t>(OpCode::OP_ADD_LOCAL_CONST)); out.push_back(idx_a); out.push_back(const_idx);
+                    i += 5; handled = true;
+                } else if (add_op == static_cast<uint8_t>(OpCode::OP_ADD_FLOAT)) {
+                    out.push_back(static_cast<uint8_t>(OpCode::OP_ADD_LOCAL_CONST)); out.push_back(idx_a); out.push_back(const_idx);
+                    i += 5; handled = true;
+                } else if (add_op == static_cast<uint8_t>(OpCode::OP_ADD_STRING)) {
+                    out.push_back(static_cast<uint8_t>(OpCode::OP_ADD_LOCAL_CONST)); out.push_back(idx_a); out.push_back(const_idx);
+                    i += 5; handled = true;
+                }
+                if (handled) continue;
+            }
+
+            if (src[i] == static_cast<uint8_t>(OpCode::OP_CONSTANT) && src[i+2] == static_cast<uint8_t>(OpCode::OP_GET_LOCAL)) {
+                uint8_t const_idx = src[i+1];
+                uint8_t idx_a = src[i+3];
+                uint8_t add_op = src[i+4];
+                bool handled = false;
+                if (add_op == static_cast<uint8_t>(OpCode::OP_ADD_INT)) {
+                    out.push_back(static_cast<uint8_t>(OpCode::OP_ADD_CONST_LOCAL)); out.push_back(const_idx); out.push_back(idx_a);
+                    i += 5; handled = true;
+                } else if (add_op == static_cast<uint8_t>(OpCode::OP_ADD_FLOAT)) {
+                    out.push_back(static_cast<uint8_t>(OpCode::OP_ADD_CONST_LOCAL)); out.push_back(const_idx); out.push_back(idx_a);
+                    i += 5; handled = true;
+                } else if (add_op == static_cast<uint8_t>(OpCode::OP_ADD_STRING)) {
+                    out.push_back(static_cast<uint8_t>(OpCode::OP_ADD_CONST_LOCAL)); out.push_back(const_idx); out.push_back(idx_a);
+                    i += 5; handled = true;
+                }
+                if (handled) continue;
+            }
         }
 
         out.push_back(src[i]);
