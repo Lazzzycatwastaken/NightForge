@@ -73,8 +73,8 @@ struct Token {
     int line;
     int column;
     
-    Token(TokenType t, const std::string& lex, int ln, int col)
-        : type(t), lexeme(lex), line(ln), column(col) {}
+    Token(TokenType t, std::string lex, int ln, int col)
+        : type(t), lexeme(std::move(lex)), line(ln), column(col) {}
 };
 
 class Lexer {
@@ -104,7 +104,9 @@ private:
     Token make_token(TokenType type, const std::string& lexeme);
     Token string_token(char quote_char = '"');
     Token number_token();
+    Token number_token(char first);
     Token identifier_token();
+    Token identifier_token(char first);
     void skip_comment();
 };
 

@@ -77,6 +77,8 @@ enum class OpCode : uint8_t {
     OP_CONSTANT_LOCAL,
     OP_ADD_LOCAL_CONST,
     OP_ADD_CONST_LOCAL,
+    OP_ADD_LOCAL_CONST_FLOAT,
+    OP_ADD_CONST_LOCAL_FLOAT,
 };
 
 // Value types (classification)

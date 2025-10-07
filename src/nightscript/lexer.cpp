@@ -41,6 +41,7 @@ Lexer::Lexer(const std::string& source)
 
 std::vector<Token> Lexer::tokenize() {
     std::vector<Token> tokens;
+    tokens.reserve(128);
     
     while (!is_at_end()) {
         Token token = next_token();
@@ -80,25 +81,18 @@ Token Lexer::next_token() {
     }
     
     // String literals (double or single quotes)
-    if (c == '"') {
-        return string_token('"');
+    if (c == '"' || c == '\'') {
+        return string_token(c);
     }
-    if (c == '\'') {
-        return string_token('\'');
-    }
-    
+
     // Numbers
     if (is_digit(c)) {
-        current_--; // backtrack
-        column_--;
-        return number_token();
+        return number_token(c);
     }
-    
+
     // Identifiers and keywords
     if (is_alpha(c)) {
-        current_--; // backtrack
-        column_--;
-        return identifier_token();
+        return identifier_token(c);
     }
     
     // Two-character operators
@@ -227,14 +221,15 @@ Token Lexer::string_token(char quote_char) {
     return Token(TokenType::STRING, value, line_, column_ - value.length() - 2);
 }
 
-Token Lexer::number_token() {
-    int start_col = column_;
+Token Lexer::number_token(char first) {
+    int start_col = column_ - 1; // first already consumed
     std::string value;
-    
+    value.push_back(first);
+
     while (!is_at_end() && is_digit(peek())) {
         value += advance();
     }
-    
+
     // Check for decimal point
     if (!is_at_end() && peek() == '.' && is_digit(peek_next())) {
         value += advance(); // consume dot
@@ -242,23 +237,24 @@ Token Lexer::number_token() {
             value += advance();
         }
     }
-    
-    return Token(TokenType::NUMBER, value, line_, start_col);
+
+    return Token(TokenType::NUMBER, std::move(value), line_, start_col);
 }
 
-Token Lexer::identifier_token() {
-    int start_col = column_;
+Token Lexer::identifier_token(char first) {
+    int start_col = column_ - 1;
     std::string value;
-    
+    value.push_back(first);
+
     while (!is_at_end() && is_alphanumeric(peek())) {
         value += advance();
     }
-    
+
     // Check if its a keyword
     auto it = keywords_.find(value);
     TokenType type = (it != keywords_.end()) ? it->second : TokenType::IDENTIFIER;
-    
-    return Token(type, value, line_, start_col);
+
+    return Token(type, std::move(value), line_, start_col);
 }
 
 void Lexer::skip_comment() {

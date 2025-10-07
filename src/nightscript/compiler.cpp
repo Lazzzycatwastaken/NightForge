@@ -42,7 +42,6 @@ bool Compiler::compile(const std::string& source, Chunk& chunk, StringTable& str
     
     emit_return();
     thread_jumps();
-    lower_stack_to_registers();
     return !had_error_;
 }
 
@@ -51,6 +50,11 @@ void Compiler::lower_stack_to_registers() {
     std::vector<uint8_t> out;
     size_t i = 0;
     uint8_t next_reg = 0;
+    
+    size_t local_local_opts = 0;
+    size_t local_const_opts = 0;
+    size_t const_local_opts = 0;
+    
     while (i < src.size()) {
         uint8_t op = src[i];
         if (i + 4 < src.size()) {
@@ -62,13 +66,13 @@ void Compiler::lower_stack_to_registers() {
 
                 if (add_op == static_cast<uint8_t>(OpCode::OP_ADD_INT)) {
                     out.push_back(static_cast<uint8_t>(OpCode::OP_ADD_LOCAL)); out.push_back(idx_a); out.push_back(idx_b);
-                    i += 5; handled = true;
+                    i += 5; handled = true; local_local_opts++;
                 } else if (add_op == static_cast<uint8_t>(OpCode::OP_ADD_FLOAT)) {
                     out.push_back(static_cast<uint8_t>(OpCode::OP_ADD_FLOAT_LOCAL)); out.push_back(idx_a); out.push_back(idx_b);
-                    i += 5; handled = true;
+                    i += 5; handled = true; local_local_opts++;
                 } else if (add_op == static_cast<uint8_t>(OpCode::OP_ADD_STRING)) {
                     out.push_back(static_cast<uint8_t>(OpCode::OP_ADD_STRING_LOCAL)); out.push_back(idx_a); out.push_back(idx_b);
-                    i += 5; handled = true;
+                    i += 5; handled = true; local_local_opts++;
                 }
 
                 if (handled) continue;
@@ -81,13 +85,13 @@ void Compiler::lower_stack_to_registers() {
                 bool handled = false;
                 if (add_op == static_cast<uint8_t>(OpCode::OP_ADD_INT)) {
                     out.push_back(static_cast<uint8_t>(OpCode::OP_ADD_LOCAL_CONST)); out.push_back(idx_a); out.push_back(const_idx);
-                    i += 5; handled = true;
+                    i += 5; handled = true; local_const_opts++;
                 } else if (add_op == static_cast<uint8_t>(OpCode::OP_ADD_FLOAT)) {
-                    out.push_back(static_cast<uint8_t>(OpCode::OP_ADD_LOCAL_CONST)); out.push_back(idx_a); out.push_back(const_idx);
-                    i += 5; handled = true;
+                    out.push_back(static_cast<uint8_t>(OpCode::OP_ADD_LOCAL_CONST_FLOAT)); out.push_back(idx_a); out.push_back(const_idx);
+                    i += 5; handled = true; local_const_opts++;
                 } else if (add_op == static_cast<uint8_t>(OpCode::OP_ADD_STRING)) {
                     out.push_back(static_cast<uint8_t>(OpCode::OP_ADD_LOCAL_CONST)); out.push_back(idx_a); out.push_back(const_idx);
-                    i += 5; handled = true;
+                    i += 5; handled = true; local_const_opts++;
                 }
                 if (handled) continue;
             }
@@ -99,13 +103,13 @@ void Compiler::lower_stack_to_registers() {
                 bool handled = false;
                 if (add_op == static_cast<uint8_t>(OpCode::OP_ADD_INT)) {
                     out.push_back(static_cast<uint8_t>(OpCode::OP_ADD_CONST_LOCAL)); out.push_back(const_idx); out.push_back(idx_a);
-                    i += 5; handled = true;
+                    i += 5; handled = true; const_local_opts++;
                 } else if (add_op == static_cast<uint8_t>(OpCode::OP_ADD_FLOAT)) {
-                    out.push_back(static_cast<uint8_t>(OpCode::OP_ADD_CONST_LOCAL)); out.push_back(const_idx); out.push_back(idx_a);
-                    i += 5; handled = true;
+                    out.push_back(static_cast<uint8_t>(OpCode::OP_ADD_CONST_LOCAL_FLOAT)); out.push_back(const_idx); out.push_back(idx_a);
+                    i += 5; handled = true; const_local_opts++;
                 } else if (add_op == static_cast<uint8_t>(OpCode::OP_ADD_STRING)) {
                     out.push_back(static_cast<uint8_t>(OpCode::OP_ADD_CONST_LOCAL)); out.push_back(const_idx); out.push_back(idx_a);
-                    i += 5; handled = true;
+                    i += 5; handled = true; const_local_opts++;
                 }
                 if (handled) continue;
             }
@@ -990,17 +994,17 @@ void Compiler::emit_optimized_binary_op(TokenType op, InferredType left_type, In
         stats_.generic_ops_emitted++;
     }
     
-    //Const folding for constant expressions
     const auto& code = chunk_->code();
     if (code.size() >= 4) {
         size_t n = code.size();
-        uint8_t last3 = code[n-4];
-        uint8_t last2 = code[n-3];
-        uint8_t last1 = code[n-2];
-        uint8_t last0 = code[n-1];
-        if (static_cast<OpCode>(last3) == OpCode::OP_CONSTANT && static_cast<OpCode>(last1) == OpCode::OP_CONSTANT) {
-            uint8_t idx_a = last2;
-            uint8_t idx_b = last0;
+        uint8_t b3 = code[n-4];
+        uint8_t b2 = code[n-3];
+        uint8_t b1 = code[n-2];
+        uint8_t b0 = code[n-1];
+
+        if (static_cast<OpCode>(b3) == OpCode::OP_CONSTANT && static_cast<OpCode>(b1) == OpCode::OP_CONSTANT) {
+            uint8_t idx_a = b2;
+            uint8_t idx_b = b0;
             Value a = chunk_->get_constant(idx_a);
             Value b = chunk_->get_constant(idx_b);
             bool foldable = false;
@@ -1039,11 +1043,63 @@ void Compiler::emit_optimized_binary_op(TokenType op, InferredType left_type, In
             }
 
             if (foldable) {
-                for (int i = 0; i < 4; ++i) chunk_->patch_byte(chunk_->code_size() - 4 + i, 0);
                 auto& code_mut = const_cast<std::vector<uint8_t>&>(chunk_->code());
                 code_mut.resize(code_mut.size() - 4);
                 emit_constant(result);
                 stats_.constant_folds++;
+                return;
+            }
+        }
+        if (code.size() >= 4) {
+            size_t n2 = code.size();
+            uint8_t p3 = code[n2-4];
+            uint8_t p2 = code[n2-3];
+            uint8_t p1 = code[n2-2];
+            uint8_t p0 = code[n2-1];
+
+            if (static_cast<OpCode>(p3) == OpCode::OP_GET_LOCAL && static_cast<OpCode>(p1) == OpCode::OP_GET_LOCAL) {
+                uint8_t idx_a = p2;
+                uint8_t idx_b = p0;
+                OpCode fused = OpCode::OP_ADD_LOCAL;
+                if (specialized_op == OpCode::OP_ADD_FLOAT) fused = OpCode::OP_ADD_FLOAT_LOCAL;
+                else if (specialized_op == OpCode::OP_ADD_STRING) fused = OpCode::OP_ADD_STRING_LOCAL;
+
+                auto& code_mut = const_cast<std::vector<uint8_t>&>(chunk_->code());
+                code_mut.resize(code_mut.size() - 4);
+                chunk_->write_byte(static_cast<uint8_t>(fused), current_token().line);
+                chunk_->write_byte(idx_a, current_token().line);
+                chunk_->write_byte(idx_b, current_token().line);
+                stats_.specialized_ops_emitted++;
+                return;
+            }
+
+            if (static_cast<OpCode>(p3) == OpCode::OP_GET_LOCAL && static_cast<OpCode>(p1) == OpCode::OP_CONSTANT) {
+                uint8_t idx_a = p2;
+                uint8_t const_idx = p0;
+                OpCode fused = OpCode::OP_ADD_LOCAL_CONST;
+                if (specialized_op == OpCode::OP_ADD_FLOAT) fused = OpCode::OP_ADD_LOCAL_CONST_FLOAT;
+
+                auto& code_mut = const_cast<std::vector<uint8_t>&>(chunk_->code());
+                code_mut.resize(code_mut.size() - 4);
+                chunk_->write_byte(static_cast<uint8_t>(fused), current_token().line);
+                chunk_->write_byte(idx_a, current_token().line);
+                chunk_->write_byte(const_idx, current_token().line);
+                stats_.specialized_ops_emitted++;
+                return;
+            }
+
+            if (static_cast<OpCode>(p3) == OpCode::OP_CONSTANT && static_cast<OpCode>(p1) == OpCode::OP_GET_LOCAL) {
+                uint8_t const_idx = p2;
+                uint8_t idx_a = p0;
+                OpCode fused = OpCode::OP_ADD_CONST_LOCAL;
+                if (specialized_op == OpCode::OP_ADD_FLOAT) fused = OpCode::OP_ADD_CONST_LOCAL_FLOAT;
+
+                auto& code_mut = const_cast<std::vector<uint8_t>&>(chunk_->code());
+                code_mut.resize(code_mut.size() - 4);
+                chunk_->write_byte(static_cast<uint8_t>(fused), current_token().line);
+                chunk_->write_byte(const_idx, current_token().line);
+                chunk_->write_byte(idx_a, current_token().line);
+                stats_.specialized_ops_emitted++;
                 return;
             }
         }

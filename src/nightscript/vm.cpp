@@ -8,6 +8,8 @@
 #include <charconv>
 #include <chrono>
 
+// the evil class of unredability
+
 #ifdef DEBUG_TRACE_EXECUTION
 #  undef DEBUG_TRACE_EXECUTION
 #endif
@@ -32,8 +34,6 @@ VMResult VM::execute(const Chunk& chunk) {
 VMResult VM::execute(const Chunk& chunk, const Chunk* parent_chunk) {
     return run(chunk, parent_chunk);
 }
-
-// Note: host functions are provided by HostEnvironment VM no longer stores them internally
 
 void VM::set_global(const std::string& name, const Value& value) {
     globals_[name] = value;
@@ -102,7 +102,7 @@ Value VM::peek(int distance) {
 
 void VM::reset_stack() {
     stack_top_ = stack_;
-    has_runtime_error_ = false;  // Reset error state when resetting stack
+    has_runtime_error_ = false;
 }
 
 VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
@@ -117,782 +117,783 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
     std::cout << "== execution begin ==" << std::endl;
 #endif
     
-    while (ip < end) {
-        // Check for runtime errors before processing next instruction
-        if (has_runtime_error_) {
-            return VMResult::RUNTIME_ERROR;
-        }
-        
-    const uint8_t* ip_before = ip;
-    uint8_t instruction = read_byte(ip);
-    stats.op_counts[instruction]++;
-        
-#ifdef DEBUG_TRACE_EXECUTION
-        print_stack();
-        std::cout << "Instruction: " << static_cast<int>(instruction) << std::endl;
-#endif
-        
-        switch (static_cast<OpCode>(instruction)) {
-            case OpCode::OP_CONSTANT: {
-                Value constant = read_constant(chunk, ip);
-                push(constant);
-                break;
-            }
-            
-            case OpCode::OP_NIL:
-                push(Value::nil());
-                break;
-                
-            case OpCode::OP_TRUE:
-                push(Value::boolean(true));
-                break;
-                
-            case OpCode::OP_FALSE:
-                push(Value::boolean(false));
-                break;
-                
-            case OpCode::OP_ADD:
-            case OpCode::OP_SUBTRACT:
-            case OpCode::OP_MULTIPLY:
-            case OpCode::OP_DIVIDE:
-            case OpCode::OP_MODULO:
-                if (!binary_op(static_cast<OpCode>(instruction))) {
-                    return VMResult::RUNTIME_ERROR;
-                }
-                break;
-                
-            //fast arithmetic operations
-            case OpCode::OP_ADD_INT: {
-                Value b = pop();
-                Value a = pop();
-                push(Value::integer(a.as_integer() + b.as_integer()));
-                break;
-            }
-            
-            case OpCode::OP_ADD_FLOAT: {
-                Value b = pop();
-                Value a = pop();
-                push(Value::floating(a.as_floating() + b.as_floating()));
-                break;
-            }
-            
-            case OpCode::OP_ADD_STRING: {
-                Value b = pop();
-                Value a = pop();
-                
-                // Fast path: both are string IDs - create buffer directly
-                if (a.is_string_id() && b.is_string_id()) {
-                    uint32_t buf = buffers_.create_from_ids(a.as_string_id(), b.as_string_id(), strings_);
-                    push(Value::buffer_id(buf));
-                    bytes_allocated_since_gc_ += buffers_.get_buffer(buf).length();
-                    break;
-                }
-                
-                // One is a buffer - reuse it (massive performance boost for chained concat)
-                if (a.type() == ValueType::STRING_BUFFER) {
-                    uint32_t buf_id = a.as_buffer_id();
-                    if (b.is_string_id()) {
-                        buffers_.append_id(buf_id, b.as_string_id(), strings_);
-                    } else {
-                        buffers_.append_literal(buf_id, value_to_string(b));
-                    }
-                    push(Value::buffer_id(buf_id));
-                    bytes_allocated_since_gc_ += 32; // Approximate allocation for append
-                    break;
-                }
-                
-                std::string str_a = value_to_string(a);
-                std::string str_b = value_to_string(b);
-                uint32_t buf = buffers_.create_from_two(str_a, str_b);
-                buffers_.reserve(buf, str_a.length() + str_b.length() + 64);
-                push(Value::buffer_id(buf));
-                bytes_allocated_since_gc_ += buffers_.get_buffer(buf).length();
+    // Computed-goto dispatch implementation (actual cancer to do jesus)
+    // The dispatch table MUST exactly match the OpCode enum order.
+    
+    // macros
+    #define DISPATCH() goto *dispatch_table[read_byte(ip)]
+    #define SAFE_DISPATCH() do { if (ip >= end) return VMResult::OK; DISPATCH(); } while(0)
+    #define COUNT_OPCODE(op) do { stats.op_counts[static_cast<uint8_t>(OpCode::op)]++; } while(0)
 
-                if (bytes_allocated_since_gc_ > GC_THRESHOLD) {
-                    collect_garbage(&chunk);
-                }
-                break;
-            }
+    static void* dispatch_table[] = {
+        &&op_CONSTANT,        // OP_CONSTANT
+        &&op_NIL,             // OP_NIL
+        &&op_TRUE,            // OP_TRUE
+        &&op_FALSE,           // OP_FALSE
 
-            case OpCode::OP_ADD_LOCAL_CONST: {
-                uint8_t idx_a = read_byte(ip);
-                Value vc = read_constant(chunk, ip);
-                if (local_frame_bases_.empty()) {
-                    runtime_error("No local frame for OP_ADD_LOCAL_CONST");
-                    return VMResult::RUNTIME_ERROR;
-                }
-                size_t base = local_frame_bases_.back();
-                size_t abs_a = base + static_cast<size_t>(idx_a);
-                if (abs_a >= param_stack_.size()) {
-                    runtime_error("Local index out of range for OP_ADD_LOCAL_CONST");
-                    return VMResult::RUNTIME_ERROR;
-                }
-                Value va = param_stack_[abs_a];
-                if (va.type() == ValueType::INT && vc.type() == ValueType::INT) {
-                    push(Value::integer(va.as_integer() + vc.as_integer()));
-                } else if (va.type() == ValueType::FLOAT || vc.type() == ValueType::FLOAT) {
-                    double da = (va.type() == ValueType::FLOAT) ? va.as_floating() : static_cast<double>(va.as_integer());
-                    double dc = (vc.type() == ValueType::FLOAT) ? vc.as_floating() : static_cast<double>(vc.as_integer());
-                    push(Value::floating(da + dc));
-                } else if (va.type() == ValueType::STRING_ID || vc.type() == ValueType::STRING_ID || va.type() == ValueType::STRING_BUFFER || vc.type() == ValueType::STRING_BUFFER) {
-                    std::string sa = value_to_string(va);
-                    std::string sc = value_to_string(vc);
-                    uint32_t buf = buffers_.create_from_two(sa, sc);
-                    push(Value::buffer_id(buf));
-                    bytes_allocated_since_gc_ += buffers_.get_buffer(buf).length();
-                } else {
-                    runtime_error("ADD_LOCAL_CONST unsupported types");
-                    return VMResult::RUNTIME_ERROR;
-                }
-                break;
-            }
+        &&op_GET_GLOBAL,      // OP_GET_GLOBAL
+        &&op_SET_GLOBAL,      // OP_SET_GLOBAL
+        &&op_GET_LOCAL,       // OP_GET_LOCAL
+        &&op_SET_LOCAL,       // OP_SET_LOCAL
 
-            case OpCode::OP_ADD_CONST_LOCAL: {
-                // constant then local
-                Value vc = read_constant(chunk, ip);
-                uint8_t idx_a = read_byte(ip);
-                if (local_frame_bases_.empty()) {
-                    runtime_error("No local frame for OP_ADD_CONST_LOCAL");
-                    return VMResult::RUNTIME_ERROR;
-                }
-                size_t base = local_frame_bases_.back();
-                size_t abs_a = base + static_cast<size_t>(idx_a);
-                if (abs_a >= param_stack_.size()) {
-                    runtime_error("Local index out of range for OP_ADD_CONST_LOCAL");
-                    return VMResult::RUNTIME_ERROR;
-                }
-                Value va = param_stack_[abs_a];
-                if (va.type() == ValueType::INT && vc.type() == ValueType::INT) {
-                    push(Value::integer(vc.as_integer() + va.as_integer()));
-                } else if (va.type() == ValueType::FLOAT || vc.type() == ValueType::FLOAT) {
-                    double da = (va.type() == ValueType::FLOAT) ? va.as_floating() : static_cast<double>(va.as_integer());
-                    double dc = (vc.type() == ValueType::FLOAT) ? vc.as_floating() : static_cast<double>(vc.as_integer());
-                    push(Value::floating(dc + da));
-                } else if (va.type() == ValueType::STRING_ID || vc.type() == ValueType::STRING_ID || va.type() == ValueType::STRING_BUFFER || vc.type() == ValueType::STRING_BUFFER) {
-                    std::string sc = value_to_string(vc);
-                    std::string sa = value_to_string(va);
-                    uint32_t buf = buffers_.create_from_two(sc, sa);
-                    push(Value::buffer_id(buf));
-                    bytes_allocated_since_gc_ += buffers_.get_buffer(buf).length();
-                } else {
-                    runtime_error("ADD_CONST_LOCAL unsupported types");
-                    return VMResult::RUNTIME_ERROR;
-                }
-                break;
-            }
+        &&op_ADD,             // OP_ADD
+        &&op_SUBTRACT,        // OP_SUBTRACT
+        &&op_MULTIPLY,        // OP_MULTIPLY
+        &&op_DIVIDE,          // OP_DIVIDE
+        &&op_MODULO,          // OP_MODULO
 
-            case OpCode::OP_CONSTANT_LOCAL: {
-                Value vc = read_constant(chunk, ip);
-                uint8_t local_idx = read_byte(ip);
-                if (local_frame_bases_.empty()) {
-                    runtime_error("CONSTANT_LOCAL with no frame");
-                    return VMResult::RUNTIME_ERROR;
-                }
-                size_t base = local_frame_bases_.back();
-                if (base + static_cast<size_t>(local_idx) >= param_stack_.size()) {
-                    runtime_error("CONSTANT_LOCAL local index OOB");
-                    return VMResult::RUNTIME_ERROR;
-                }
-                param_stack_[base + static_cast<size_t>(local_idx)] = vc;
-                break;
-            }
-            
-            case OpCode::OP_SUB_INT: {
-                Value b = pop();
-                Value a = pop();
-                push(Value::integer(a.as_integer() - b.as_integer()));
-                break;
-            }
-            
-            case OpCode::OP_SUB_FLOAT: {
-                Value b = pop();
-                Value a = pop();
-                push(Value::floating(a.as_floating() - b.as_floating()));
-                break;
-            }
-            
-            case OpCode::OP_MUL_INT: {
-                Value b = pop();
-                Value a = pop();
-                push(Value::integer(a.as_integer() * b.as_integer()));
-                break;
-            }
-            
-            case OpCode::OP_MUL_FLOAT: {
-                Value b = pop();
-                Value a = pop();
-                push(Value::floating(a.as_floating() * b.as_floating()));
-                break;
-            }
-            
-            case OpCode::OP_DIV_INT: {
-                Value b = pop();
-                Value a = pop();
-                if (b.as_integer() == 0) {
-                    runtime_error("Division by zero");
-                    return VMResult::RUNTIME_ERROR;
-                }
-                push(Value::integer(a.as_integer() / b.as_integer()));
-                break;
-            }
-            
-            case OpCode::OP_DIV_FLOAT: {
-                Value b = pop();
-                Value a = pop();
-                if (b.as_floating() == 0.0) {
-                    runtime_error("Division by zero");
-                    return VMResult::RUNTIME_ERROR;
-                }
-                push(Value::floating(a.as_floating() / b.as_floating()));
-                break;
-            }
-            
-            case OpCode::OP_MOD_INT: {
-                Value b = pop();
-                Value a = pop();
-                if (b.as_integer() == 0) {
-                    runtime_error("Modulo by zero");
-                    return VMResult::RUNTIME_ERROR;
-                }
-                push(Value::integer(a.as_integer() % b.as_integer()));
-                break;
-            }
-                
-            case OpCode::OP_NOT: {
-                Value value = pop();
-                bool is_falsy = (value.type() == ValueType::NIL) || 
-                               (value.type() == ValueType::BOOL && !value.as_boolean());
-                push(Value::boolean(is_falsy));
-                break;
-            }
+        &&op_ADD_INT,         // OP_ADD_INT
+        &&op_ADD_FLOAT,       // OP_ADD_FLOAT
+        &&op_ADD_STRING,      // OP_ADD_STRING
+        &&op_SUB_INT,         // OP_SUB_INT
+        &&op_SUB_FLOAT,       // OP_SUB_FLOAT
+        &&op_MUL_INT,         // OP_MUL_INT
+        &&op_MUL_FLOAT,       // OP_MUL_FLOAT
+        &&op_DIV_INT,         // OP_DIV_INT
+        &&op_DIV_FLOAT,       // OP_DIV_FLOAT
+        &&op_MOD_INT,         // OP_MOD_INT
 
-            case OpCode::OP_JUMP_IF_FALSE: {
-                Value cond = pop();
-                bool is_false = (cond.type() == ValueType::NIL) || (cond.type() == ValueType::BOOL && !cond.as_boolean());
-                uint8_t offset = read_byte(ip);
-                if (is_false) {
-                    ip += offset;
-                }
-                break;
-            }
+        &&op_EQUAL,           // OP_EQUAL
+        &&op_GREATER,         // OP_GREATER
+        &&op_GREATER_EQUAL,   // OP_GREATER_EQUAL
+        &&op_LESS_EQUAL,      // OP_LESS_EQUAL
+        &&op_LESS,            // OP_LESS
+        &&op_NOT,             // OP_NOT
 
-            case OpCode::OP_JUMP: {
-                uint8_t offset = read_byte(ip);
-                ip += offset;
-                break;
-            }
+        &&op_JUMP,            // OP_JUMP
+        &&op_JUMP_IF_FALSE,   // OP_JUMP_IF_FALSE
+        &&op_JUMP_BACK,       // OP_JUMP_BACK
+        &&op_CALL,            // OP_CALL
+        &&op_CALL_HOST,       // OP_CALL_HOST
+        &&op_TAIL_CALL,       // OP_TAIL_CALL
+        &&op_RETURN,          // OP_RETURN
 
-            case OpCode::OP_JUMP_BACK: {
-                uint8_t offset = read_byte(ip);
-                ip -= offset;
-                break;
-            }
-            
-            case OpCode::OP_EQUAL: {
-                Value b = pop();
-                Value a = pop();
-                // Simple equality (could be better)
-                bool equal = false;
-                if (a.type() == b.type()) {
-                    switch (a.type()) {
-                        case ValueType::NIL: equal = true; break;
-                        case ValueType::BOOL: equal = a.as_boolean() == b.as_boolean(); break;
-                        case ValueType::INT: equal = a.as_integer() == b.as_integer(); break;
-                        case ValueType::FLOAT: equal = a.as_floating() == b.as_floating(); break;
-                        case ValueType::STRING_ID: equal = a.as_string_id() == b.as_string_id(); break;
-                        default: equal = false; break;
-                    }
-                }
-                push(Value::boolean(equal));
-                break;
-            }
+        &&op_POP,             // OP_POP
+        &&op_PRINT,           // OP_PRINT
+        &&op_PRINT_SPACE,     // OP_PRINT_SPACE
+        &&op_CONSTANT_R,      // OP_CONSTANT_R
+        &&op_GET_LOCAL_R,     // OP_GET_LOCAL_R
+        &&op_PUSH_REG,        // OP_PUSH_REG
 
-            case OpCode::OP_GREATER: {
-                Value b = pop();
-                Value a = pop();
-                bool result = false;
-                if (a.type() == b.type()) {
-                    switch (a.type()) {
-                        case ValueType::INT: result = a.as_integer() > b.as_integer(); break;
-                        case ValueType::FLOAT: result = a.as_floating() > b.as_floating(); break;
-                        default: result = false; break;
-                    }
-                }
-                push(Value::boolean(result));
-                break;
-            }
+        &&op_ADD_INT_R,       // OP_ADD_INT_R
+        &&op_ADD_FLOAT_R,     // OP_ADD_FLOAT_R
+        &&op_ADD_STRING_R,    // OP_ADD_STRING_R
 
-            case OpCode::OP_GREATER_EQUAL: {
-                Value b = pop();
-                Value a = pop();
-                bool result = false;
-                if (a.type() == b.type()) {
-                    switch (a.type()) {
-                        case ValueType::INT: result = a.as_integer() >= b.as_integer(); break;
-                        case ValueType::FLOAT: result = a.as_floating() >= b.as_floating(); break;
-                        default: result = false; break;
-                    }
-                }
-                push(Value::boolean(result));
-                break;
-            }
+        &&op_ADD_LOCAL,       // OP_ADD_LOCAL
+        &&op_ADD_FLOAT_LOCAL, // OP_ADD_FLOAT_LOCAL
+        &&op_ADD_STRING_LOCAL,// OP_ADD_STRING_LOCAL
 
-            case OpCode::OP_LESS_EQUAL: {
-                Value b = pop();
-                Value a = pop();
-                bool result = false;
-                if (a.type() == b.type()) {
-                    switch (a.type()) {
-                        case ValueType::INT: result = a.as_integer() <= b.as_integer(); break;
-                        case ValueType::FLOAT: result = a.as_floating() <= b.as_floating(); break;
-                        default: result = false; break;
-                    }
-                }
-                push(Value::boolean(result));
-                break;
-            }
+        &&op_CONSTANT_LOCAL,  // OP_CONSTANT_LOCAL
+        &&op_ADD_LOCAL_CONST, // OP_ADD_LOCAL_CONST
+        &&op_ADD_CONST_LOCAL, // OP_ADD_CONST_LOCAL
+        &&op_ADD_LOCAL_CONST_FLOAT, // OP_ADD_LOCAL_CONST_FLOAT
+        &&op_ADD_CONST_LOCAL_FLOAT, // OP_ADD_CONST_LOCAL_FLOAT
+    };
 
-            case OpCode::OP_LESS: {
-                Value b = pop();
-                Value a = pop();
-                bool result = false;
-                if (a.type() == b.type()) {
-                    switch (a.type()) {
-                        case ValueType::INT: result = a.as_integer() < b.as_integer(); break;
-                        case ValueType::FLOAT: result = a.as_floating() < b.as_floating(); break;
-                        default: result = false; break;
-                    }
-                }
-                push(Value::boolean(result));
-                break;
-            }
-            
-            case OpCode::OP_PRINT: {
-                Value value = pop();
-                if (value.type() == ValueType::STRING_BUFFER) {
-                    std::cout << buffers_.get_buffer(value.as_buffer_id());
-                } else {
-                switch (value.type()) {
-                    case ValueType::NIL: std::cout << "nil"; break;
-                    case ValueType::BOOL: std::cout << (value.as_boolean() ? "true" : "false"); break;
-                    case ValueType::INT: std::cout << value.as_integer(); break;
-                    case ValueType::FLOAT: std::cout << value.as_floating(); break;
-                    case ValueType::STRING_ID: 
-                        std::cout << strings_.get_string(value.as_string_id()); 
-                        break;
-                    default: std::cout << "unknown"; break;
-                }
-                }
-                std::cout << std::endl;
-                break;
-            }
-            
-            case OpCode::OP_PRINT_SPACE: {
-                Value value = pop();
-                if (value.type() == ValueType::STRING_BUFFER) {
-                    std::cout << buffers_.get_buffer(value.as_buffer_id());
-                } else {
-                switch (value.type()) {
-                    case ValueType::NIL: std::cout << "nil"; break;
-                    case ValueType::BOOL: std::cout << (value.as_boolean() ? "true" : "false"); break;
-                    case ValueType::INT: std::cout << value.as_integer(); break;
-                    case ValueType::FLOAT: std::cout << value.as_floating(); break;
-                    case ValueType::STRING_ID: 
-                        std::cout << strings_.get_string(value.as_string_id()); 
-                        break;
-                    default: std::cout << "unknown"; break;
-                }
-                }
-                std::cout << " ";  // space instead of newline
-                break;
-            }
+    constexpr size_t OPCODE_COUNT = static_cast<size_t>(OpCode::OP_ADD_CONST_LOCAL_FLOAT) + 1;
+    static_assert(sizeof(dispatch_table) / sizeof(void*) == OPCODE_COUNT, "dispatch_table size must match OpCode count");
 
-            case OpCode::OP_CONSTANT_R: {
-                uint8_t dest = read_byte(ip);
-                uint8_t idx = read_byte(ip);
-                Value constant = chunk.get_constant(idx);
-                if (dest < REG_COUNT) registers_[dest] = constant;
-                break;
-            }
+    if (ip >= end) return VMResult::OK;
+    DISPATCH();
 
-            case OpCode::OP_GET_LOCAL_R: {
-                uint8_t dest = read_byte(ip);
-                uint8_t idx = read_byte(ip);
-                if (local_frame_bases_.empty()) {
-                    runtime_error("No local frame for GET_LOCAL_R");
-                    return VMResult::RUNTIME_ERROR;
-                }
-                size_t base = local_frame_bases_.back();
-                size_t abs = base + static_cast<size_t>(idx);
-                if (abs >= param_stack_.size()) {
-                    runtime_error("Local index out of range for GET_LOCAL_R");
-                    return VMResult::RUNTIME_ERROR;
-                }
-                if (dest < REG_COUNT) registers_[dest] = param_stack_[abs];
-                break;
-            }
+op_CONSTANT: {
+    COUNT_OPCODE(OP_CONSTANT);
+    Value constant = read_constant(chunk, ip);
+    push(constant);
+    SAFE_DISPATCH();
+}
 
-            case OpCode::OP_PUSH_REG: {
-                uint8_t reg = read_byte(ip);
-                if (reg >= REG_COUNT) {
-                    runtime_error("Invalid register in PUSH_REG");
-                    return VMResult::RUNTIME_ERROR;
-                }
-                push(registers_[reg]);
-                break;
-            }
+op_NIL: {
+    COUNT_OPCODE(OP_NIL);
+    push(Value::nil());
+    SAFE_DISPATCH();
+}
 
-            case OpCode::OP_ADD_INT_R: {
-                uint8_t dest = read_byte(ip);
-                uint8_t s1 = read_byte(ip);
-                uint8_t s2 = read_byte(ip);
-                int64_t a = registers_[s1].as_integer();
-                int64_t b = registers_[s2].as_integer();
-                if (dest < REG_COUNT) registers_[dest] = Value::integer(a + b);
-                break;
-            }
+op_TRUE: {
+    COUNT_OPCODE(OP_TRUE);
+    push(Value::boolean(true));
+    SAFE_DISPATCH();
+}
 
-            case OpCode::OP_ADD_FLOAT_R: {
-                uint8_t dest = read_byte(ip);
-                uint8_t s1 = read_byte(ip);
-                uint8_t s2 = read_byte(ip);
-                double a = registers_[s1].as_floating();
-                double b = registers_[s2].as_floating();
-                if (dest < REG_COUNT) registers_[dest] = Value::floating(a + b);
-                break;
-            }
+op_FALSE: {
+    COUNT_OPCODE(OP_FALSE);
+    push(Value::boolean(false));
+    SAFE_DISPATCH();
+}
 
-            case OpCode::OP_ADD_STRING_R: {
-                uint8_t dest = read_byte(ip);
-                uint8_t s1 = read_byte(ip);
-                uint8_t s2 = read_byte(ip);
-                // Build buffer from two register values
-                std::string sa = value_to_string(registers_[s1]);
-                std::string sb = value_to_string(registers_[s2]);
-                uint32_t buf = buffers_.create_from_two(sa, sb);
-                if (dest < REG_COUNT) registers_[dest] = Value::buffer_id(buf);
-                bytes_allocated_since_gc_ += buffers_.get_buffer(buf).length();
-                break;
-            }
-
-            case OpCode::OP_ADD_LOCAL: {
-                uint8_t idx_a = read_byte(ip);
-                uint8_t idx_b = read_byte(ip);
-                if (local_frame_bases_.empty()) {
-                    runtime_error("No local frame for OP_ADD_LOCAL");
-                    return VMResult::RUNTIME_ERROR;
-                }
-                size_t base = local_frame_bases_.back();
-                size_t abs_a = base + static_cast<size_t>(idx_a);
-                size_t abs_b = base + static_cast<size_t>(idx_b);
-                if (abs_a >= param_stack_.size() || abs_b >= param_stack_.size()) {
-                    runtime_error("Local index out of range for OP_ADD_LOCAL");
-                    return VMResult::RUNTIME_ERROR;
-                }
-                Value a = param_stack_[abs_a];
-                Value b = param_stack_[abs_b];
-                if (a.type() == ValueType::INT && b.type() == ValueType::INT) {
-                    push(Value::integer(a.as_integer() + b.as_integer()));
-                } else {
-                    // Fallback to numeric addition semantics
-                    double da = (a.type() == ValueType::FLOAT) ? a.as_floating() : static_cast<double>(a.as_integer());
-                    double db = (b.type() == ValueType::FLOAT) ? b.as_floating() : static_cast<double>(b.as_integer());
-                    push(Value::floating(da + db));
-                }
-                break;
-            }
-
-            case OpCode::OP_ADD_FLOAT_LOCAL: {
-                uint8_t idx_a = read_byte(ip);
-                uint8_t idx_b = read_byte(ip);
-                if (local_frame_bases_.empty()) {
-                    runtime_error("No local frame for OP_ADD_FLOAT_LOCAL");
-                    return VMResult::RUNTIME_ERROR;
-                }
-                size_t base = local_frame_bases_.back();
-                size_t abs_a = base + static_cast<size_t>(idx_a);
-                size_t abs_b = base + static_cast<size_t>(idx_b);
-                if (abs_a >= param_stack_.size() || abs_b >= param_stack_.size()) {
-                    runtime_error("Local index out of range for OP_ADD_FLOAT_LOCAL");
-                    return VMResult::RUNTIME_ERROR;
-                }
-                double da = (param_stack_[abs_a].type() == ValueType::FLOAT) ? param_stack_[abs_a].as_floating() : static_cast<double>(param_stack_[abs_a].as_integer());
-                double db = (param_stack_[abs_b].type() == ValueType::FLOAT) ? param_stack_[abs_b].as_floating() : static_cast<double>(param_stack_[abs_b].as_integer());
-                push(Value::floating(da + db));
-                break;
-            }
-
-            case OpCode::OP_ADD_STRING_LOCAL: {
-                uint8_t idx_a = read_byte(ip);
-                uint8_t idx_b = read_byte(ip);
-                if (local_frame_bases_.empty()) {
-                    runtime_error("No local frame for OP_ADD_STRING_LOCAL");
-                    return VMResult::RUNTIME_ERROR;
-                }
-                size_t base = local_frame_bases_.back();
-                size_t abs_a = base + static_cast<size_t>(idx_a);
-                size_t abs_b = base + static_cast<size_t>(idx_b);
-                if (abs_a >= param_stack_.size() || abs_b >= param_stack_.size()) {
-                    runtime_error("Local index out of range for OP_ADD_STRING_LOCAL");
-                    return VMResult::RUNTIME_ERROR;
-                }
-                std::string sa = value_to_string(param_stack_[abs_a]);
-                std::string sb = value_to_string(param_stack_[abs_b]);
-                uint32_t buf = buffers_.create_from_two(sa, sb);
-                push(Value::buffer_id(buf));
-                bytes_allocated_since_gc_ += buffers_.get_buffer(buf).length();
-                break;
-            }
-            
-            case OpCode::OP_CALL_HOST: {
-                Value function_name = read_constant(chunk, ip);
-                uint8_t arg_count = read_byte(ip);
-
-                if (function_name.type() != ValueType::STRING_ID) {
-                    runtime_error("Expected function name");
-                    return VMResult::RUNTIME_ERROR;
-                }
-
-                std::string func_name = strings_.get_string(function_name.as_string_id());
-                // Convert to lowercase for case-insensitive lookup
-                std::string func_name_lc = func_name;
-                std::transform(func_name_lc.begin(), func_name_lc.end(), func_name_lc.begin(), [](unsigned char c){ return std::tolower(c); });
-
-                tmp_args_.clear();
-                if (arg_count > 0) {
-                    tmp_args_.resize(arg_count);
-                    for (int i = arg_count - 1; i >= 0; --i) {
-                        tmp_args_[i] = pop();
-                        if (i == 0) break;
-                    }
-                }
-
-                if (host_env_) {
-                    auto result = host_env_->call_host(func_name_lc, tmp_args_);
-                    if (result.has_value()) {
-                        push(*result);
-                        break;
-                    }
-                }
-
-                // If not a host function, check for user-defined function in the chunk
-                ssize_t func_index = chunk.get_function_index(func_name_lc);
-                if (func_index >= 0) {
-                    const Chunk& fchunk = chunk.get_function(static_cast<size_t>(func_index));
-
-                    // Use param stack/local frames instead of globals
-                    const std::vector<std::string>& locals_combined = chunk.get_function_local_names(static_cast<size_t>(func_index));
-                    push_local_frame(locals_combined, tmp_args_);
-
-                    // Save current stack state
-                    Value* saved_stack_top = stack_top_;
-
-                    VMResult r = execute(fchunk, &chunk);
-
-                    pop_local_frame();
-
-                    if (r != VMResult::OK) return r;
-
-                    if (stack_top_ <= stack_) {
-                        push(Value::nil());
-                    }
-
-                    Value return_value = pop();
-                    if (return_value.type() == ValueType::STRING_BUFFER) {
-                        uint32_t sid = strings_.intern(buffers_.get_buffer(return_value.as_buffer_id()));
-                        return_value = Value::string_id(sid);
-                    }
-                    stack_top_ = saved_stack_top;
-                    push(return_value);
-                    break;
-                }
-
-                if (parent_chunk) {
-                    ssize_t parent_func_index = parent_chunk->get_function_index(func_name_lc);
-                    if (parent_func_index >= 0) {
-                        const Chunk& fchunk = parent_chunk->get_function(static_cast<size_t>(parent_func_index));
-
-                        // Set function parameters as globals  
-                        const std::vector<std::string>& locals_combined = parent_chunk->get_function_local_names(static_cast<size_t>(parent_func_index));
-                        push_local_frame(locals_combined, tmp_args_);
-
-                        // Save current stack state
-                        Value* saved_stack_top = stack_top_;
-
-                        // Execute function chunk pass parent chunk as parent for recursive lookups
-                        VMResult r = execute(fchunk, parent_chunk);
-
-                        pop_local_frame();
-
-                        if (r != VMResult::OK) return r;
-
-                        if (stack_top_ <= stack_) {
-                            push(Value::nil());
-                        }
-
-                        Value return_value = pop();
-                        if (return_value.type() == ValueType::STRING_BUFFER) {
-                            uint32_t sid = strings_.intern(buffers_.get_buffer(return_value.as_buffer_id()));
-                            return_value = Value::string_id(sid);
-                        }
-                        stack_top_ = saved_stack_top;
-                        push(return_value);
-                        break;
-                    }
-                }
-
-                runtime_error("Unknown function: %s", func_name.c_str());
-                // Debug
-                std::cerr << "Available functions in chunk:\n";
-                for (size_t i = 0; i < chunk.function_count(); ++i) {
-                    std::cerr << " - " << chunk.function_name(i) << "\n";
-                }
-                return VMResult::RUNTIME_ERROR;
-                break;
-            }
-            
-            case OpCode::OP_TAIL_CALL: {
-                // Optimized tail call (reuses current stack frame)
-                Value function_name = read_constant(chunk, ip);
-                uint8_t arg_count = read_byte(ip);
-                
-                if (function_name.type() != ValueType::STRING_ID) {
-                    runtime_error("Expected function name");
-                    return VMResult::RUNTIME_ERROR;
-                }
-                
-                std::string func_name = strings_.get_string(function_name.as_string_id());
-                std::string func_name_lc = func_name;
-                std::transform(func_name_lc.begin(), func_name_lc.end(), func_name_lc.begin(), [](unsigned char c){ return std::tolower(c); });
-                
-                tmp_args_.clear();
-                if (arg_count > 0) {
-                    tmp_args_.resize(arg_count);
-                    for (int i = arg_count - 1; i >= 0; --i) {
-                        tmp_args_[i] = pop();
-                        if (i == 0) break;
-                    }
-                }
-
-                ssize_t func_index = chunk.get_function_index(func_name_lc);
-                if (func_index >= 0) {
-                    const std::vector<std::string>& locals_combined = chunk.get_function_local_names(static_cast<size_t>(func_index));
-
-                    if (!local_frames_.empty()) pop_local_frame();
-                    push_local_frame(locals_combined, tmp_args_);
-
-                    ip = chunk.code().data();
-                    continue; // Restart execution from the beginning
-                }
-                
-                if (host_env_) {
-                    auto result = host_env_->call_host(func_name_lc, tmp_args_);
-                    if (result.has_value()) {
-                        push(*result);
-                        break;
-                    }
-                }
-
-                runtime_error("Unknown function in tail call: %s", func_name.c_str());
-                return VMResult::RUNTIME_ERROR;
-                break;
-            }
-            
-            case OpCode::OP_GET_GLOBAL: {
-                Value variable_name = read_constant(chunk, ip);
-                if (variable_name.type() != ValueType::STRING_ID) {
-                    runtime_error("Expected variable name");
-                    return VMResult::RUNTIME_ERROR;
-                }
-
-                uint32_t sid = variable_name.as_string_id();
-                std::string var_name = strings_.get_string(sid);
-                Value local_val;
-                if (local_lookup(var_name, local_val)) {
-                    push(local_val);
-                } else {
-                    auto it = globals_by_id_.find(sid);
-                    if (it != globals_by_id_.end()) {
-                        push(it->second);
-                    } else {
-                        Value value = get_global(var_name);
-                        push(value);
-                    }
-                }
-                break;
-            }
-
-            case OpCode::OP_GET_LOCAL: {
-                uint8_t idx = read_byte(ip);
-                if (local_frame_bases_.empty()) {
-                    runtime_error("No local frame for GET_LOCAL");
-                    return VMResult::RUNTIME_ERROR;
-                }
-                size_t base = local_frame_bases_.back();
-                size_t abs = base + static_cast<size_t>(idx);
-                if (abs >= param_stack_.size()) {
-                    runtime_error("Local index out of range");
-                    return VMResult::RUNTIME_ERROR;
-                }
-                push(param_stack_[abs]);
-                break;
-            }
-            
-            case OpCode::OP_SET_GLOBAL: {
-                Value variable_name = read_constant(chunk, ip);
-                if (variable_name.type() != ValueType::STRING_ID) {
-                    runtime_error("Expected variable name");
-                    return VMResult::RUNTIME_ERROR;
-                }
-
-                uint32_t sid = variable_name.as_string_id();
-                std::string var_name = strings_.get_string(sid);
-                Value value = peek(); // Don't pop - assignment is an expression
-                if (!local_frames_.empty()) {
-                    const auto& frame = local_frames_.back();
-                    auto it = frame.find(var_name);
-                    if (it != frame.end()) {
-                        size_t idx = it->second;
-                        if (idx < param_stack_.size()) param_stack_[idx] = value;
-                        break;
-                    }
-                }
-                globals_by_id_[sid] = value;
-                globals_[var_name] = value;
-                break;
-            }
-
-            case OpCode::OP_SET_LOCAL: {
-                uint8_t idx = read_byte(ip);
-                if (local_frame_bases_.empty()) {
-                    runtime_error("No local frame for SET_LOCAL");
-                    return VMResult::RUNTIME_ERROR;
-                }
-                size_t base = local_frame_bases_.back();
-                size_t abs = base + static_cast<size_t>(idx);
-                Value value = peek(); // assignment is an expression
-                if (abs >= param_stack_.size()) {
-                    runtime_error("Local index out of range for SET_LOCAL");
-                    return VMResult::RUNTIME_ERROR;
-                }
-                param_stack_[abs] = value;
-                break;
-            }
-            
-            case OpCode::OP_POP:
-                pop();
-                break;
-                
-            case OpCode::OP_RETURN:
-                // For now just end execution
-                return VMResult::OK;
-                
-            default:
-                runtime_error("Unknown opcode: %d", instruction);
-                return VMResult::RUNTIME_ERROR;
+op_GET_GLOBAL: {
+    COUNT_OPCODE(OP_GET_GLOBAL);
+    Value variable_name = read_constant(chunk, ip);
+    if (variable_name.type() != ValueType::STRING_ID) {
+        runtime_error("Expected variable name");
+        return VMResult::RUNTIME_ERROR;
+    }
+    uint32_t sid = variable_name.as_string_id();
+    {
+        std::string var_name = strings_.get_string(sid);
+        Value local_val;
+        if (local_lookup(var_name, local_val)) {
+            push(local_val);
+        } else {
+            auto it = globals_by_id_.find(sid);
+            if (it != globals_by_id_.end()) push(it->second);
+            else push(get_global(var_name));
         }
     }
-    
+    SAFE_DISPATCH();
+}
+
+op_SET_GLOBAL: {
+    COUNT_OPCODE(OP_SET_GLOBAL);
+    Value variable_name = read_constant(chunk, ip);
+    if (variable_name.type() != ValueType::STRING_ID) {
+        runtime_error("Expected variable name");
+        return VMResult::RUNTIME_ERROR;
+    }
+    uint32_t sid = variable_name.as_string_id();
+    Value value = peek();
+    {
+        std::string var_name = strings_.get_string(sid);
+        if (!local_frames_.empty()) {
+            const auto& frame = local_frames_.back();
+            auto it = frame.find(var_name);
+            if (it != frame.end()) {
+                size_t idx = it->second;
+                if (idx < param_stack_.size()) { param_stack_[idx] = value; SAFE_DISPATCH(); }
+            }
+        }
+        globals_by_id_[sid] = value;
+        globals_[var_name] = value;
+    }
+    SAFE_DISPATCH();
+}
+
+op_GET_LOCAL: {
+    COUNT_OPCODE(OP_GET_LOCAL);
+    uint8_t idx = read_byte(ip);
+    if (local_frame_bases_.empty()) {
+        runtime_error("No local frame for GET_LOCAL");
+        return VMResult::RUNTIME_ERROR;
+    }
+    size_t base = local_frame_bases_.back();
+    size_t abs = base + static_cast<size_t>(idx);
+    if (abs >= param_stack_.size()) {
+        runtime_error("Local index out of range");
+        return VMResult::RUNTIME_ERROR;
+    }
+    push(param_stack_[abs]);
+    SAFE_DISPATCH();
+}
+
+op_SET_LOCAL: {
+    COUNT_OPCODE(OP_SET_LOCAL);
+    uint8_t idx = read_byte(ip);
+    if (local_frame_bases_.empty()) {
+        runtime_error("No local frame for SET_LOCAL");
+        return VMResult::RUNTIME_ERROR;
+    }
+    size_t base = local_frame_bases_.back();
+    size_t abs = base + static_cast<size_t>(idx);
+    Value value = peek();
+    if (abs >= param_stack_.size()) {
+        runtime_error("Local index out of range for SET_LOCAL");
+        return VMResult::RUNTIME_ERROR;
+    }
+    param_stack_[abs] = value;
+    SAFE_DISPATCH();
+}
+
+op_ADD: {
+    COUNT_OPCODE(OP_ADD);
+    if (!binary_op(OpCode::OP_ADD)) return VMResult::RUNTIME_ERROR;
+    SAFE_DISPATCH();
+}
+
+op_SUBTRACT: {
+    COUNT_OPCODE(OP_SUBTRACT);
+    if (!binary_op(OpCode::OP_SUBTRACT)) return VMResult::RUNTIME_ERROR;
+    SAFE_DISPATCH();
+}
+
+op_MULTIPLY: {
+    COUNT_OPCODE(OP_MULTIPLY);
+    if (!binary_op(OpCode::OP_MULTIPLY)) return VMResult::RUNTIME_ERROR;
+    SAFE_DISPATCH();
+}
+
+op_DIVIDE: {
+    COUNT_OPCODE(OP_DIVIDE);
+    if (!binary_op(OpCode::OP_DIVIDE)) return VMResult::RUNTIME_ERROR;
+    SAFE_DISPATCH();
+}
+
+op_MODULO: {
+    COUNT_OPCODE(OP_MODULO);
+    if (!binary_op(OpCode::OP_MODULO)) return VMResult::RUNTIME_ERROR;
+    SAFE_DISPATCH();
+}
+
+op_ADD_INT: {
+    COUNT_OPCODE(OP_ADD_INT);
+    if (stack_top_ - stack_ >= 2) {
+        int64_t a_val = stack_top_[-2].as_integer();
+        int64_t b_val = stack_top_[-1].as_integer();
+        stack_top_ -= 2;
+        push(Value::integer(a_val + b_val));
+    } else {
+        Value b = pop(); Value a = pop();
+        push(Value::integer(a.as_integer() + b.as_integer()));
+    }
+    SAFE_DISPATCH();
+}
+
+op_ADD_FLOAT: {
+    COUNT_OPCODE(OP_ADD_FLOAT);
+    if (stack_top_ - stack_ >= 2) {
+        double a_val = stack_top_[-2].as_floating();
+        double b_val = stack_top_[-1].as_floating();
+        stack_top_ -= 2;
+        push(Value::floating(a_val + b_val));
+    } else {
+        Value b = pop(); Value a = pop();
+        push(Value::floating(a.as_floating() + b.as_floating()));
+    }
+    SAFE_DISPATCH();
+}
+
+op_ADD_STRING: {
+    COUNT_OPCODE(OP_ADD_STRING);
+    Value b = pop(); Value a = pop();
+    if (a.is_string_id() && b.is_string_id()) {
+        uint32_t buf = buffers_.create_from_ids(a.as_string_id(), b.as_string_id(), strings_);
+        push(Value::buffer_id(buf));
+        bytes_allocated_since_gc_ += buffers_.get_buffer(buf).length();
+        SAFE_DISPATCH();
+    }
+    if (a.type() == ValueType::STRING_BUFFER) {
+        uint32_t buf_id = a.as_buffer_id();
+        if (b.is_string_id()) buffers_.append_id(buf_id, b.as_string_id(), strings_);
+        else buffers_.append_literal(buf_id, value_to_string(b));
+        push(Value::buffer_id(buf_id));
+        bytes_allocated_since_gc_ += 32;
+        SAFE_DISPATCH();
+    }
+    {
+        std::string str_a = value_to_string(a);
+        std::string str_b = value_to_string(b);
+        uint32_t buf = buffers_.create_from_two(str_a, str_b);
+        buffers_.reserve(buf, str_a.length() + str_b.length() + 64);
+        push(Value::buffer_id(buf));
+        bytes_allocated_since_gc_ += buffers_.get_buffer(buf).length();
+    }
+    if (bytes_allocated_since_gc_ > GC_THRESHOLD) collect_garbage(&chunk);
+    SAFE_DISPATCH();
+}
+
+op_SUB_INT: {
+    COUNT_OPCODE(OP_SUB_INT);
+    if (stack_top_ - stack_ >= 2) {
+        int64_t a_val = stack_top_[-2].as_integer();
+        int64_t b_val = stack_top_[-1].as_integer();
+        stack_top_ -= 2;
+        push(Value::integer(a_val - b_val));
+    } else {
+        Value b = pop(); Value a = pop(); push(Value::integer(a.as_integer() - b.as_integer()));
+    }
+    SAFE_DISPATCH();
+}
+
+op_SUB_FLOAT: {
+    COUNT_OPCODE(OP_SUB_FLOAT);
+    if (stack_top_ - stack_ >= 2) {
+        double a_val = stack_top_[-2].as_floating();
+        double b_val = stack_top_[-1].as_floating();
+        stack_top_ -= 2;
+        push(Value::floating(a_val - b_val));
+    } else {
+        Value b = pop(); Value a = pop(); push(Value::floating(a.as_floating() - b.as_floating()));
+    }
+    SAFE_DISPATCH();
+}
+
+op_MUL_INT: {
+    COUNT_OPCODE(OP_MUL_INT);
+    if (stack_top_ - stack_ >= 2) {
+        int64_t a_val = stack_top_[-2].as_integer();
+        int64_t b_val = stack_top_[-1].as_integer();
+        stack_top_ -= 2;
+        push(Value::integer(a_val * b_val));
+    } else {
+        Value b = pop(); Value a = pop(); push(Value::integer(a.as_integer() * b.as_integer()));
+    }
+    SAFE_DISPATCH();
+}
+
+op_MUL_FLOAT: {
+    COUNT_OPCODE(OP_MUL_FLOAT);
+    if (stack_top_ - stack_ >= 2) {
+        double a_val = stack_top_[-2].as_floating();
+        double b_val = stack_top_[-1].as_floating();
+        stack_top_ -= 2;
+        push(Value::floating(a_val * b_val));
+    } else {
+        Value b = pop(); Value a = pop(); push(Value::floating(a.as_floating() * b.as_floating()));
+    }
+    SAFE_DISPATCH();
+}
+
+op_DIV_INT: {
+    COUNT_OPCODE(OP_DIV_INT);
+    if (stack_top_ - stack_ >= 2) {
+        int64_t a_val = stack_top_[-2].as_integer();
+        int64_t b_val = stack_top_[-1].as_integer();
+        stack_top_ -= 2;
+        if (b_val == 0) { runtime_error("Division by zero"); return VMResult::RUNTIME_ERROR; }
+        push(Value::integer(a_val / b_val));
+    } else {
+        Value b = pop(); Value a = pop(); if (b.as_integer() == 0) { runtime_error("Division by zero"); return VMResult::RUNTIME_ERROR; } push(Value::integer(a.as_integer() / b.as_integer()));
+    }
+    SAFE_DISPATCH();
+}
+
+op_DIV_FLOAT: {
+    COUNT_OPCODE(OP_DIV_FLOAT);
+    if (stack_top_ - stack_ >= 2) {
+        double a_val = stack_top_[-2].as_floating();
+        double b_val = stack_top_[-1].as_floating();
+        stack_top_ -= 2;
+        if (b_val == 0.0) { runtime_error("Division by zero"); return VMResult::RUNTIME_ERROR; }
+        push(Value::floating(a_val / b_val));
+    } else {
+        Value b = pop(); Value a = pop(); if (b.as_floating() == 0.0) { runtime_error("Division by zero"); return VMResult::RUNTIME_ERROR; } push(Value::floating(a.as_floating() / b.as_floating()));
+    }
+    SAFE_DISPATCH();
+}
+
+op_MOD_INT: {
+    COUNT_OPCODE(OP_MOD_INT);
+    if (stack_top_ - stack_ >= 2) {
+        int64_t a_val = stack_top_[-2].as_integer();
+        int64_t b_val = stack_top_[-1].as_integer();
+        stack_top_ -= 2;
+        if (b_val == 0) { runtime_error("Modulo by zero"); return VMResult::RUNTIME_ERROR; }
+        push(Value::integer(a_val % b_val));
+    } else {
+        Value b = pop(); Value a = pop(); if (b.as_integer() == 0) { runtime_error("Modulo by zero"); return VMResult::RUNTIME_ERROR; } push(Value::integer(a.as_integer() % b.as_integer()));
+    }
+    SAFE_DISPATCH();
+}
+
+op_EQUAL: {
+    COUNT_OPCODE(OP_EQUAL);
+    Value b = pop(); Value a = pop(); bool equal = false; if (a.type() == b.type()) { switch (a.type()) { case ValueType::NIL: equal = true; break; case ValueType::BOOL: equal = a.as_boolean() == b.as_boolean(); break; case ValueType::INT: equal = a.as_integer() == b.as_integer(); break; case ValueType::FLOAT: equal = a.as_floating() == b.as_floating(); break; case ValueType::STRING_ID: equal = a.as_string_id() == b.as_string_id(); break; default: equal = false; break; } } push(Value::boolean(equal)); SAFE_DISPATCH();
+}
+
+op_GREATER: {
+    COUNT_OPCODE(OP_GREATER);
+    Value b = pop(); Value a = pop(); bool result = false; if (a.type() == b.type()) { switch (a.type()) { case ValueType::INT: result = a.as_integer() > b.as_integer(); break; case ValueType::FLOAT: result = a.as_floating() > b.as_floating(); break; default: result = false; break; } } push(Value::boolean(result)); SAFE_DISPATCH();
+}
+
+op_GREATER_EQUAL: {
+    COUNT_OPCODE(OP_GREATER_EQUAL);
+    Value b = pop(); Value a = pop(); bool result = false; if (a.type() == b.type()) { switch (a.type()) { case ValueType::INT: result = a.as_integer() >= b.as_integer(); break; case ValueType::FLOAT: result = a.as_floating() >= b.as_floating(); break; default: result = false; break; } } push(Value::boolean(result)); SAFE_DISPATCH();
+}
+
+op_LESS_EQUAL: {
+    COUNT_OPCODE(OP_LESS_EQUAL);
+    Value b = pop(); Value a = pop(); bool result = false; if (a.type() == b.type()) { switch (a.type()) { case ValueType::INT: result = a.as_integer() <= b.as_integer(); break; case ValueType::FLOAT: result = a.as_floating() <= b.as_floating(); break; default: result = false; break; } } push(Value::boolean(result)); SAFE_DISPATCH();
+}
+
+op_LESS: {
+    COUNT_OPCODE(OP_LESS);
+    Value b = pop(); Value a = pop(); bool result = false; if (a.type() == b.type()) { switch (a.type()) { case ValueType::INT: result = a.as_integer() < b.as_integer(); break; case ValueType::FLOAT: result = a.as_floating() < b.as_floating(); break; default: result = false; break; } } push(Value::boolean(result)); SAFE_DISPATCH();
+}
+
+op_NOT: {
+    COUNT_OPCODE(OP_NOT);
+    Value value = pop(); bool is_falsy = (value.type() == ValueType::NIL) || (value.type() == ValueType::BOOL && !value.as_boolean()); push(Value::boolean(is_falsy)); SAFE_DISPATCH();
+}
+
+op_JUMP: {
+    COUNT_OPCODE(OP_JUMP);
+    uint8_t offset = read_byte(ip); ip += offset; SAFE_DISPATCH();
+}
+
+op_JUMP_IF_FALSE: {
+    COUNT_OPCODE(OP_JUMP_IF_FALSE);
+    Value cond = pop(); bool is_false = (cond.type() == ValueType::NIL) || (cond.type() == ValueType::BOOL && !cond.as_boolean()); uint8_t offset = read_byte(ip); if (is_false) ip += offset; SAFE_DISPATCH();
+}
+
+op_JUMP_BACK: {
+    COUNT_OPCODE(OP_JUMP_BACK);
+    uint8_t offset = read_byte(ip); ip -= offset; SAFE_DISPATCH();
+}
+
+op_CALL: {
+    COUNT_OPCODE(OP_CALL);
+    SAFE_DISPATCH();
+}
+
+op_CALL_HOST: {
+    COUNT_OPCODE(OP_CALL_HOST);
+
+    Value function_name = read_constant(chunk, ip);
+    uint8_t arg_count = read_byte(ip);
+
+    if (function_name.type() != ValueType::STRING_ID) {
+        runtime_error("Expected function name");
+        return VMResult::RUNTIME_ERROR;
+    }
+
+    uint32_t fname_sid = function_name.as_string_id();
+
+    tmp_args_.clear();
+    if (arg_count > 0) {
+        tmp_args_.resize(arg_count);
+        for (int i = arg_count - 1; i >= 0; --i) {
+            tmp_args_[i] = pop();
+            if (i == 0) break;
+        }
+    }
+
+    std::optional<Value> host_result;
+    if (host_env_) {
+        {
+            std::string func_name = strings_.get_string(fname_sid);
+            std::string func_name_lc = func_name;
+            std::transform(func_name_lc.begin(), func_name_lc.end(), func_name_lc.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+            host_result = host_env_->call_host(func_name_lc, tmp_args_);
+        }
+    }
+    if (host_result.has_value()) {
+        push(*host_result);
+        SAFE_DISPATCH();
+    }
+
+    std::string func_name_lc;
+    ssize_t func_index = chunk.get_function_index(func_name_lc);
+    {
+        std::string fn = strings_.get_string(fname_sid);
+        func_name_lc = fn;
+        std::transform(func_name_lc.begin(), func_name_lc.end(), func_name_lc.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    }
+    func_index = chunk.get_function_index(func_name_lc);
+    if (func_index >= 0) {
+        const Chunk& fchunk = chunk.get_function(static_cast<size_t>(func_index));
+        const std::vector<std::string>& locals_combined = chunk.get_function_local_names(static_cast<size_t>(func_index));
+
+        push_local_frame(locals_combined, tmp_args_);
+        Value* saved_stack_top = stack_top_;
+        VMResult r = execute(fchunk, &chunk);
+        pop_local_frame();
+
+        if (r != VMResult::OK) return r;
+
+        if (stack_top_ <= stack_) push(Value::nil());
+
+        Value return_value = pop();
+        if (return_value.type() == ValueType::STRING_BUFFER) {
+            uint32_t sid = strings_.intern(buffers_.get_buffer(return_value.as_buffer_id()));
+            return_value = Value::string_id(sid);
+        }
+
+        stack_top_ = saved_stack_top;
+        push(return_value);
+        SAFE_DISPATCH();
+    }
+
+    if (parent_chunk) {
+        ssize_t parent_func_index = parent_chunk->get_function_index(func_name_lc);
+        if (parent_func_index >= 0) {
+            const Chunk& fchunk = parent_chunk->get_function(static_cast<size_t>(parent_func_index));
+            const std::vector<std::string>& locals_combined = parent_chunk->get_function_local_names(static_cast<size_t>(parent_func_index));
+
+            push_local_frame(locals_combined, tmp_args_);
+            Value* saved_stack_top = stack_top_;
+            VMResult r = execute(fchunk, parent_chunk);
+            pop_local_frame();
+
+            if (r != VMResult::OK) return r;
+            if (stack_top_ <= stack_) push(Value::nil());
+
+            Value return_value = pop();
+            if (return_value.type() == ValueType::STRING_BUFFER) {
+                uint32_t sid = strings_.intern(buffers_.get_buffer(return_value.as_buffer_id()));
+                return_value = Value::string_id(sid);
+            }
+
+            stack_top_ = saved_stack_top;
+            push(return_value);
+            SAFE_DISPATCH();
+        }
+    }
+
+    runtime_error("Unknown function: %s", strings_.get_string(fname_sid).c_str());
+    std::cerr << "Available functions in chunk:\n";
+    for (size_t i = 0; i < chunk.function_count(); ++i)
+        std::cerr << " - " << chunk.function_name(i) << "\n";
+
+    return VMResult::RUNTIME_ERROR;
+}
+
+op_TAIL_CALL: {
+    COUNT_OPCODE(OP_TAIL_CALL);
+
+    Value function_name = read_constant(chunk, ip);
+    uint8_t arg_count = read_byte(ip);
+
+    if (function_name.type() != ValueType::STRING_ID) {
+        runtime_error("Expected function name");
+        return VMResult::RUNTIME_ERROR;
+    }
+
+    uint32_t fname_sid = function_name.as_string_id();
+
+    tmp_args_.clear();
+    if (arg_count > 0) {
+        tmp_args_.resize(arg_count);
+        for (int i = arg_count - 1; i >= 0; --i) {
+            tmp_args_[i] = pop();
+            if (i == 0) break;
+        }
+    }
+
+    std::string func_name_lc;
+    {
+        std::string fn = strings_.get_string(fname_sid);
+        func_name_lc = fn;
+        std::transform(func_name_lc.begin(), func_name_lc.end(), func_name_lc.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    }
+
+    ssize_t func_index = chunk.get_function_index(func_name_lc);
+    if (func_index >= 0) {
+        const std::vector<std::string>& locals_combined = chunk.get_function_local_names(static_cast<size_t>(func_index));
+        if (!local_frames_.empty()) pop_local_frame();
+        push_local_frame(locals_combined, tmp_args_);
+
+        ip = chunk.code().data();
+        if (ip >= end) return VMResult::OK;
+        DISPATCH();
+    }
+
+    std::optional<Value> host_result;
+    if (host_env_) {
+        host_result = host_env_->call_host(func_name_lc, tmp_args_);
+    }
+    if (host_result.has_value()) {
+        push(*host_result);
+        SAFE_DISPATCH();
+    }
+
+    runtime_error("Unknown function in tail call: %s", strings_.get_string(fname_sid).c_str());
+    return VMResult::RUNTIME_ERROR;
+}
+
+op_RETURN: {
+    COUNT_OPCODE(OP_RETURN);
+    return VMResult::OK;
+}
+
+op_POP: {
+    COUNT_OPCODE(OP_POP);
+    pop(); SAFE_DISPATCH();
+}
+
+op_PRINT: {
+    COUNT_OPCODE(OP_PRINT);
+    Value value = pop();
+    if (value.type() == ValueType::STRING_BUFFER) std::cout << buffers_.get_buffer(value.as_buffer_id());
+    else {
+        switch (value.type()) { case ValueType::NIL: std::cout << "nil"; break; case ValueType::BOOL: std::cout << (value.as_boolean() ? "true" : "false"); break; case ValueType::INT: std::cout << value.as_integer(); break; case ValueType::FLOAT: std::cout << value.as_floating(); break; case ValueType::STRING_ID: std::cout << strings_.get_string(value.as_string_id()); break; default: std::cout << "unknown"; break; }
+    }
+    std::cout << std::endl; SAFE_DISPATCH();
+}
+
+op_PRINT_SPACE: {
+    COUNT_OPCODE(OP_PRINT_SPACE);
+    Value value = pop();
+    if (value.type() == ValueType::STRING_BUFFER) std::cout << buffers_.get_buffer(value.as_buffer_id());
+    else {
+        switch (value.type()) { case ValueType::NIL: std::cout << "nil"; break; case ValueType::BOOL: std::cout << (value.as_boolean() ? "true" : "false"); break; case ValueType::INT: std::cout << value.as_integer(); break; case ValueType::FLOAT: std::cout << value.as_floating(); break; case ValueType::STRING_ID: std::cout << strings_.get_string(value.as_string_id()); break; default: std::cout << "unknown"; break; }
+    }
+    std::cout << " "; SAFE_DISPATCH();
+}
+
+op_CONSTANT_R: {
+    COUNT_OPCODE(OP_CONSTANT_R);
+    uint8_t dest = read_byte(ip); uint8_t idx = read_byte(ip); Value constant = chunk.get_constant(idx); if (dest < REG_COUNT) registers_[dest] = constant; SAFE_DISPATCH();
+}
+
+op_GET_LOCAL_R: {
+    COUNT_OPCODE(OP_GET_LOCAL_R);
+    uint8_t dest = read_byte(ip); uint8_t idx = read_byte(ip); if (local_frame_bases_.empty()) { runtime_error("No local frame for GET_LOCAL_R"); return VMResult::RUNTIME_ERROR; } size_t base = local_frame_bases_.back(); size_t abs = base + static_cast<size_t>(idx); if (abs >= param_stack_.size()) { runtime_error("Local index out of range for GET_LOCAL_R"); return VMResult::RUNTIME_ERROR; } if (dest < REG_COUNT) registers_[dest] = param_stack_[abs]; SAFE_DISPATCH();
+}
+
+op_PUSH_REG: {
+    COUNT_OPCODE(OP_PUSH_REG);
+    uint8_t reg = read_byte(ip); if (reg >= REG_COUNT) { runtime_error("Invalid register in PUSH_REG"); return VMResult::RUNTIME_ERROR; } push(registers_[reg]); SAFE_DISPATCH();
+}
+
+op_ADD_INT_R: {
+    COUNT_OPCODE(OP_ADD_INT_R);
+    uint8_t dest = read_byte(ip); uint8_t s1 = read_byte(ip); uint8_t s2 = read_byte(ip); int64_t a = registers_[s1].as_integer(); int64_t b = registers_[s2].as_integer(); if (dest < REG_COUNT) registers_[dest] = Value::integer(a + b); SAFE_DISPATCH();
+}
+
+op_ADD_FLOAT_R: {
+    COUNT_OPCODE(OP_ADD_FLOAT_R);
+    uint8_t dest = read_byte(ip); uint8_t s1 = read_byte(ip); uint8_t s2 = read_byte(ip); double a = registers_[s1].as_floating(); double b = registers_[s2].as_floating(); if (dest < REG_COUNT) registers_[dest] = Value::floating(a + b); SAFE_DISPATCH();
+}
+
+op_ADD_STRING_R: {
+    COUNT_OPCODE(OP_ADD_STRING_R);
+    uint8_t dest = read_byte(ip);
+    uint8_t s1 = read_byte(ip);
+    uint8_t s2 = read_byte(ip);
+    {
+        std::string sa = value_to_string(registers_[s1]);
+        std::string sb = value_to_string(registers_[s2]);
+        uint32_t buf = buffers_.create_from_two(sa, sb);
+        if (dest < REG_COUNT) registers_[dest] = Value::buffer_id(buf);
+        bytes_allocated_since_gc_ += buffers_.get_buffer(buf).length();
+    }
+    SAFE_DISPATCH();
+}
+
+op_ADD_LOCAL: {
+    COUNT_OPCODE(OP_ADD_LOCAL);
+    uint8_t idx_a = read_byte(ip);
+    uint8_t idx_b = read_byte(ip);
+    if (local_frame_bases_.empty()) { runtime_error("No local frame for OP_ADD_LOCAL"); return VMResult::RUNTIME_ERROR; }
+    size_t base = local_frame_bases_.back();
+    size_t abs_a = base + static_cast<size_t>(idx_a);
+    size_t abs_b = base + static_cast<size_t>(idx_b);
+    if (abs_a >= param_stack_.size() || abs_b >= param_stack_.size()) { runtime_error("Local index out of range for OP_ADD_LOCAL"); return VMResult::RUNTIME_ERROR; }
+    const Value& a = param_stack_[abs_a];
+    const Value& b = param_stack_[abs_b];
+    if (a.type() == ValueType::INT && b.type() == ValueType::INT) {
+        push(Value::integer(a.as_integer() + b.as_integer()));
+    } else {
+        double da = (a.type() == ValueType::FLOAT) ? a.as_floating() : static_cast<double>(a.as_integer());
+        double db = (b.type() == ValueType::FLOAT) ? b.as_floating() : static_cast<double>(b.as_integer());
+        push(Value::floating(da + db));
+    }
+    SAFE_DISPATCH();
+}
+
+op_ADD_FLOAT_LOCAL: {
+    COUNT_OPCODE(OP_ADD_FLOAT_LOCAL);
+    uint8_t idx_a = read_byte(ip);
+    uint8_t idx_b = read_byte(ip);
+    if (local_frame_bases_.empty()) { runtime_error("No local frame for OP_ADD_FLOAT_LOCAL"); return VMResult::RUNTIME_ERROR; }
+    size_t base = local_frame_bases_.back();
+    size_t abs_a = base + static_cast<size_t>(idx_a);
+    size_t abs_b = base + static_cast<size_t>(idx_b);
+    if (abs_a >= param_stack_.size() || abs_b >= param_stack_.size()) { runtime_error("Local index out of range for OP_ADD_FLOAT_LOCAL"); return VMResult::RUNTIME_ERROR; }
+    const Value& va = param_stack_[abs_a];
+    const Value& vb = param_stack_[abs_b];
+    double da = (va.type() == ValueType::FLOAT) ? va.as_floating() : static_cast<double>(va.as_integer());
+    double db = (vb.type() == ValueType::FLOAT) ? vb.as_floating() : static_cast<double>(vb.as_integer());
+    push(Value::floating(da + db));
+    SAFE_DISPATCH();
+}
+
+op_ADD_STRING_LOCAL: {
+    COUNT_OPCODE(OP_ADD_STRING_LOCAL);
+    uint8_t idx_a = read_byte(ip);
+    uint8_t idx_b = read_byte(ip);
+    if (local_frame_bases_.empty()) { runtime_error("No local frame for OP_ADD_STRING_LOCAL"); return VMResult::RUNTIME_ERROR; }
+    size_t base = local_frame_bases_.back();
+    size_t abs_a = base + static_cast<size_t>(idx_a);
+    size_t abs_b = base + static_cast<size_t>(idx_b);
+    if (abs_a >= param_stack_.size() || abs_b >= param_stack_.size()) { runtime_error("Local index out of range for OP_ADD_STRING_LOCAL"); return VMResult::RUNTIME_ERROR; }
+    {
+        std::string sa = value_to_string(param_stack_[abs_a]);
+        std::string sb = value_to_string(param_stack_[abs_b]);
+        uint32_t buf = buffers_.create_from_two(sa, sb);
+        push(Value::buffer_id(buf));
+        bytes_allocated_since_gc_ += buffers_.get_buffer(buf).length();
+    }
+    SAFE_DISPATCH();
+}
+
+op_CONSTANT_LOCAL: {
+    COUNT_OPCODE(OP_CONSTANT_LOCAL);
+    Value vc = read_constant(chunk, ip); uint8_t local_idx = read_byte(ip); if (local_frame_bases_.empty()) { runtime_error("CONSTANT_LOCAL with no frame"); return VMResult::RUNTIME_ERROR; } size_t base = local_frame_bases_.back(); if (base + static_cast<size_t>(local_idx) >= param_stack_.size()) { runtime_error("CONSTANT_LOCAL local index OOB"); return VMResult::RUNTIME_ERROR; } param_stack_[base + static_cast<size_t>(local_idx)] = vc; SAFE_DISPATCH();
+}
+
+op_ADD_LOCAL_CONST: {
+    COUNT_OPCODE(OP_ADD_LOCAL_CONST);
+    uint8_t idx_a = read_byte(ip);
+    Value vc = read_constant(chunk, ip);
+    if (local_frame_bases_.empty()) { runtime_error("No local frame for OP_ADD_LOCAL_CONST"); return VMResult::RUNTIME_ERROR; }
+    size_t base = local_frame_bases_.back();
+    size_t abs_a = base + static_cast<size_t>(idx_a);
+    if (abs_a >= param_stack_.size()) { runtime_error("Local index out of range for OP_ADD_LOCAL_CONST"); return VMResult::RUNTIME_ERROR; }
+    Value va = param_stack_[abs_a];
+    if (va.type() == ValueType::INT && vc.type() == ValueType::INT) {
+        push(Value::integer(va.as_integer() + vc.as_integer()));
+    } else if (va.type() == ValueType::FLOAT || vc.type() == ValueType::FLOAT) {
+        double da = (va.type() == ValueType::FLOAT) ? va.as_floating() : static_cast<double>(va.as_integer());
+        double dc = (vc.type() == ValueType::FLOAT) ? vc.as_floating() : static_cast<double>(vc.as_integer());
+        push(Value::floating(da + dc));
+    } else if (va.type() == ValueType::STRING_ID || vc.type() == ValueType::STRING_ID || va.type() == ValueType::STRING_BUFFER || vc.type() == ValueType::STRING_BUFFER) {
+        {
+            std::string sa = value_to_string(va);
+            std::string sc = value_to_string(vc);
+            uint32_t buf = buffers_.create_from_two(sa, sc);
+            push(Value::buffer_id(buf));
+            bytes_allocated_since_gc_ += buffers_.get_buffer(buf).length();
+        }
+    } else {
+        runtime_error("ADD_LOCAL_CONST unsupported types");
+        return VMResult::RUNTIME_ERROR;
+    }
+    SAFE_DISPATCH();
+}
+
+op_ADD_CONST_LOCAL: {
+    COUNT_OPCODE(OP_ADD_CONST_LOCAL);
+    Value vc = read_constant(chunk, ip);
+    uint8_t idx_a = read_byte(ip);
+    if (local_frame_bases_.empty()) { runtime_error("No local frame for OP_ADD_CONST_LOCAL"); return VMResult::RUNTIME_ERROR; }
+    size_t base = local_frame_bases_.back();
+    size_t abs_a = base + static_cast<size_t>(idx_a);
+    if (abs_a >= param_stack_.size()) { runtime_error("Local index out of range for OP_ADD_CONST_LOCAL"); return VMResult::RUNTIME_ERROR; }
+    Value va = param_stack_[abs_a];
+    if (va.type() == ValueType::INT && vc.type() == ValueType::INT) {
+        push(Value::integer(vc.as_integer() + va.as_integer()));
+    } else if (va.type() == ValueType::FLOAT || vc.type() == ValueType::FLOAT) {
+        double da = (va.type() == ValueType::FLOAT) ? va.as_floating() : static_cast<double>(va.as_integer());
+        double dc = (vc.type() == ValueType::FLOAT) ? vc.as_floating() : static_cast<double>(vc.as_integer());
+        push(Value::floating(dc + da));
+    } else if (va.type() == ValueType::STRING_ID || vc.type() == ValueType::STRING_ID || va.type() == ValueType::STRING_BUFFER || vc.type() == ValueType::STRING_BUFFER) {
+        {
+            std::string sc = value_to_string(vc);
+            std::string sa = value_to_string(va);
+            uint32_t buf = buffers_.create_from_two(sc, sa);
+            push(Value::buffer_id(buf));
+            bytes_allocated_since_gc_ += buffers_.get_buffer(buf).length();
+        }
+    } else {
+        runtime_error("ADD_CONST_LOCAL unsupported types");
+        return VMResult::RUNTIME_ERROR;
+    }
+    SAFE_DISPATCH();
+}
+
+op_ADD_LOCAL_CONST_FLOAT: {
+    COUNT_OPCODE(OP_ADD_LOCAL_CONST_FLOAT);
+    uint8_t idx_a = read_byte(ip); Value vc = read_constant(chunk, ip); if (local_frame_bases_.empty()) { runtime_error("No local frame for OP_ADD_LOCAL_CONST_FLOAT"); return VMResult::RUNTIME_ERROR; } size_t base = local_frame_bases_.back(); size_t abs_a = base + static_cast<size_t>(idx_a); if (abs_a >= param_stack_.size()) { runtime_error("Local index out of range for OP_ADD_LOCAL_CONST_FLOAT"); return VMResult::RUNTIME_ERROR; } Value va = param_stack_[abs_a]; double da = (va.type() == ValueType::FLOAT) ? va.as_floating() : static_cast<double>(va.as_integer()); double dc = (vc.type() == ValueType::FLOAT) ? vc.as_floating() : static_cast<double>(vc.as_integer()); push(Value::floating(da + dc)); SAFE_DISPATCH();
+}
+
+op_ADD_CONST_LOCAL_FLOAT: {
+    COUNT_OPCODE(OP_ADD_CONST_LOCAL_FLOAT);
+    Value vc = read_constant(chunk, ip); uint8_t idx_a = read_byte(ip); if (local_frame_bases_.empty()) { runtime_error("No local frame for OP_ADD_CONST_LOCAL_FLOAT"); return VMResult::RUNTIME_ERROR; } size_t base = local_frame_bases_.back(); size_t abs_a = base + static_cast<size_t>(idx_a); if (abs_a >= param_stack_.size()) { runtime_error("Local index out of range for OP_ADD_CONST_LOCAL_FLOAT"); return VMResult::RUNTIME_ERROR; } Value va = param_stack_[abs_a]; double da = (va.type() == ValueType::FLOAT) ? va.as_floating() : static_cast<double>(va.as_integer()); double dc = (vc.type() == ValueType::FLOAT) ? vc.as_floating() : static_cast<double>(vc.as_integer()); push(Value::floating(dc + da)); SAFE_DISPATCH();
+}
     return VMResult::OK;
 }
 
@@ -923,7 +924,6 @@ void VM::pop_local_frame() {
     size_t base = local_frame_bases_.back();
     local_frame_bases_.pop_back();
 
-    // remove values from param_stack_
     if (base <= param_stack_.size()) {
         param_stack_.resize(base);
     }
@@ -943,8 +943,16 @@ bool VM::local_lookup(const std::string& name, Value& out) const {
 }
 
 bool VM::binary_op(OpCode op) {
-    Value b = pop();
-    Value a = pop();
+    // Fast path: read top-of-stack values directly to avoid two pop() calls
+    Value a, b;
+    if (stack_top_ - stack_ >= 2) {
+        a = stack_top_[-2];
+        b = stack_top_[-1];
+        stack_top_ -= 2;
+    } else {
+        b = pop();
+        a = pop();
+    }
     
     // Handle string concatenation for addition
     if (op == OpCode::OP_ADD && (a.type() == ValueType::STRING_ID || b.type() == ValueType::STRING_ID)) {

@@ -68,8 +68,7 @@ private:
     std::string value_to_string(const Value& val);
     
 #if USE_COMPUTED_GOTO
-    void* dispatch_table_[256];
-    void init_dispatch_table();
+
 #endif
 
     std::vector<Value> param_stack_;
@@ -94,15 +93,6 @@ private:
     StringTable strings_;
     BufferTable buffers_;
     
-    // Bytecode cache
-    struct BytecodeCache {
-        std::unordered_map<std::string, std::shared_ptr<Chunk>> cached_chunks;
-        std::unordered_map<std::string, uint64_t> file_timestamps;
-    } cache_;
-    
-    // GC state
-    std::vector<uint32_t> reachable_strings_;
-    std::vector<uint32_t> reachable_buffers_;
     size_t bytes_allocated_since_gc_ = 0;
     
     std::vector<Value> tmp_args_;
@@ -121,7 +111,6 @@ private:
     bool has_runtime_error_ = false;
     
     // Execution
-    VMResult run(const Chunk& chunk);
     VMResult run(const Chunk& chunk, const Chunk* parent_chunk);
     uint8_t read_byte(const uint8_t*& ip);
     Value read_constant(const Chunk& chunk, const uint8_t*& ip);
