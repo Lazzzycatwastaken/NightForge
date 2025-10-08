@@ -114,8 +114,10 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
     const uint8_t* ip = chunk.code().data();
     const uint8_t* end = ip + chunk.code().size();
     
+    // Pre-declare variables that are used in computed goto blocks to avoid scope issues
     std::string func_name_lc;
     std::string func_name_lc2; // For tail call
+    std::string func_name; // For host calls
     
 #ifdef DEBUG_TRACE_EXECUTION
     std::cout << "== execution begin ==" << std::endl;
@@ -489,17 +491,18 @@ op_JUMP_BACK: {
 
 op_CALL_HOST: {
     COUNT_OPCODE(OP_CALL_HOST);
-
+    
     Value function_name = read_constant(chunk, ip);
     uint8_t arg_count = read_byte(ip);
-
+    
     if (function_name.type() != ValueType::STRING_ID) {
         runtime_error("Expected function name");
         return VMResult::RUNTIME_ERROR;
     }
-
+    
     uint32_t fname_sid = function_name.as_string_id();
-
+    
+    // Collect arguments from stack
     tmp_args_.clear();
     if (arg_count > 0) {
         tmp_args_.resize(arg_count);
@@ -508,59 +511,65 @@ op_CALL_HOST: {
             if (i == 0) break;
         }
     }
-
-    std::optional<Value> host_result;
+    
+    // Convert function name to lowercase once
+    func_name = strings_.get_string(fname_sid);
+    func_name_lc = func_name;
+    std::transform(func_name_lc.begin(), func_name_lc.end(), func_name_lc.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    
+    // Try host function first (most common case for engine calls)
     if (host_env_) {
-        {
-            std::string func_name = strings_.get_string(fname_sid);
-            std::string func_name_lc = func_name;
-            std::transform(func_name_lc.begin(), func_name_lc.end(), func_name_lc.begin(),
-                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-
-            host_result = host_env_->call_host(func_name_lc, tmp_args_);
+        std::optional<Value> host_result = host_env_->call_host(func_name_lc, tmp_args_);
+        if (host_result.has_value()) {
+            push(*host_result);
+            SAFE_DISPATCH();
         }
     }
-    if (host_result.has_value()) {
-        push(*host_result);
-        SAFE_DISPATCH();
-    }
-
+    
+    // Try user-defined function in current chunk
     ssize_t func_index = chunk.get_function_index(func_name_lc);
-    {
-        std::string fn = strings_.get_string(fname_sid);
-        func_name_lc = fn;
-        std::transform(func_name_lc.begin(), func_name_lc.end(), func_name_lc.begin(),
-                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    }
-    func_index = chunk.get_function_index(func_name_lc);
     if (func_index >= 0) {
         const Chunk& fchunk = chunk.get_function(static_cast<size_t>(func_index));
         
+        // Push arguments onto stack for function
         for (const Value& arg : tmp_args_) {
             push(arg);
         }
         
+        Value* stack_before_call = stack_top_ - arg_count;
+        
         push_call_frame(&fchunk, arg_count);
-        
         VMResult r = execute(fchunk, &chunk);
-        
         pop_call_frame();
         
-        if (r != VMResult::OK) return r;
+        if (r == VMResult::OK) {
+            // Handle return value
+            if (stack_top_ > stack_before_call + 1) {
+                Value return_value = stack_top_[-1];
+                stack_top_ = stack_before_call;
+                push(return_value);
+            } else if (stack_top_ <= stack_before_call) {
+                stack_top_ = stack_before_call;
+                push(Value::nil());
+            }
+        }
         
+        if (r != VMResult::OK) return r;
         SAFE_DISPATCH();
     }
-
+    
+    // Try parent chunk (for nested function calls)
     if (parent_chunk) {
         ssize_t parent_func_index = parent_chunk->get_function_index(func_name_lc);
         if (parent_func_index >= 0) {
             const Chunk& fchunk = parent_chunk->get_function(static_cast<size_t>(parent_func_index));
             
+            // Push arguments onto stack
             for (const Value& arg : tmp_args_) {
                 push(arg);
             }
             
-            // Store stack state before call for proper cleanup  
             Value* stack_before_call = stack_top_ - arg_count;
             size_t initial_call_frames = call_frames_.size();
             
@@ -568,12 +577,14 @@ op_CALL_HOST: {
             VMResult r = execute(fchunk, parent_chunk);
             pop_call_frame();
             
+            // Verify call frame integrity
             if (call_frames_.size() != initial_call_frames) {
                 runtime_error("Call frame stack imbalance");
                 return VMResult::RUNTIME_ERROR;
             }
             
             if (r == VMResult::OK) {
+                // Handle return value
                 if (stack_top_ > stack_before_call + 1) {
                     Value return_value = stack_top_[-1];
                     stack_top_ = stack_before_call;
@@ -581,20 +592,30 @@ op_CALL_HOST: {
                 } else if (stack_top_ <= stack_before_call) {
                     stack_top_ = stack_before_call;
                     push(Value::nil());
-                } 
+                }
             }
             
             if (r != VMResult::OK) return r;
-            
             SAFE_DISPATCH();
         }
     }
-
-    runtime_error("Unknown function: %s", strings_.get_string(fname_sid).c_str());
+    
+    // Function not found anywhere
+    runtime_error("Unknown function: %s", func_name_lc.c_str());
+    
+    #ifdef DEBUG_FUNCTION_CALLS
     std::cerr << "Available functions in chunk:\n";
-    for (size_t i = 0; i < chunk.function_count(); ++i)
-        std::cerr << " - " << chunk.function_name(i) << "\n";
-
+    for (size_t i = 0; i < chunk.function_count(); ++i) {
+        std::cerr << "  - " << chunk.function_name(i) << "\n";
+    }
+    if (parent_chunk) {
+        std::cerr << "Available functions in parent chunk:\n";
+        for (size_t i = 0; i < parent_chunk->function_count(); ++i) {
+            std::cerr << "  - " << parent_chunk->function_name(i) << "\n";
+        }
+    }
+    #endif
+    
     return VMResult::RUNTIME_ERROR;
 }
 
