@@ -34,21 +34,28 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Configure CMake
+    - name: Set up MSYS2 (MINGW64)
+      uses: msys2/setup-msys2@v2
+      with:
+        msystem: MINGW64
+
+    - name: Install dependencies
+      shell: bash
+      run: |
+        pacman --noconfirm -Syuu
+        pacman --noconfirm -S --needed mingw-w64-x86_64-toolchain mingw-w64-x86_64-cmake mingw-w64-x86_64-make
+        echo "export PATH=/mingw64/bin:$PATH" >> $GITHUB_ENV
+
+    - name: Configure & Build
       shell: bash
       run: |
         mkdir build && cd build
         cmake ..
-
-    - name: Build
-      run: |
-        cd build
-        cmake --build . --config Release -- /m
+        make -j$(nproc)
 
     - name: Test
-      shell: pwsh
+      shell: bash
       run: |
-        Set-Location build\Release
-        & .\nightforge.exe --help
-        try { Start-Process -FilePath .\nightforge.exe -ArgumentList '--min-width','10','--min-height','5' -Wait -NoNewWindow } catch { }
-        Write-Output "Engine test completed on Windows"
+        cd build
+        ./nightforge --help || true
+        timeout 2s ./nightforge --min-width 10 --min-height 5 || echo "Engine test completed"

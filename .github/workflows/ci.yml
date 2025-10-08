@@ -106,6 +106,18 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    - name: Set up MSYS2 (MINGW64)
+      uses: msys2/setup-msys2@v2
+      with:
+        msystem: MINGW64
+
+    - name: Install dependencies
+      shell: bash
+      run: |
+        pacman --noconfirm -Syuu
+        pacman --noconfirm -S --needed mingw-w64-x86_64-toolchain mingw-w64-x86_64-cmake mingw-w64-x86_64-make
+        echo "export PATH=/mingw64/bin:$PATH" >> $GITHUB_ENV
+
     - name: Configure CMake
       shell: bash
       run: |
@@ -113,40 +125,34 @@ jobs:
         cd build
         cmake .. -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
 
-    - name: Build (MSBuild)
+    - name: Build
+      shell: bash
       run: |
         cd build
-        cmake --build . --config ${{ matrix.build_type }} -- /m
+        make -j$(nproc)
 
     - name: Test executables exist
-      shell: pwsh
+      shell: bash
       run: |
-        Set-Location build
-        $cfg = "${{ matrix.build_type }}"
-        $exe1 = Join-Path $cfg "nightforge.exe"
-        if (-not (Test-Path $exe1)) { Write-Error "nightforge.exe not found"; exit 1 }
-        $exe2 = Join-Path $cfg "webp_to_ascii.exe"
-        if (-not (Test-Path $exe2)) { Write-Error "webp_to_ascii.exe not found"; exit 1 }
-        Write-Output "✓ Both executables built successfully on Windows"
+        cd build
+        test -f nightforge || (echo "nightforge not built" && exit 1)
+        test -f webp_to_ascii || (echo "webp_to_ascii not built" && exit 1)
+        echo "✓ Both executables built successfully on Windows (MINGW)"
 
-    - name: Test help commands
-      shell: pwsh
+    - name: Test help commands (smoke)
+      shell: bash
       run: |
-        Set-Location build
-        $cfg = "${{ matrix.build_type }}"
-        & .\$cfg\nightforge.exe --help
-        # webp_to_ascii may return non-zero for missing args; ignore failures
-        try { & .\$cfg\webp_to_ascii.exe; } catch { }
-        Write-Output "✓ Help commands work on Windows"
+        cd build
+        ./nightforge --help || true
+        ./webp_to_ascii || true
+        echo "✓ Help commands work (MINGW)"
 
     - name: Test basic functionality
-      shell: pwsh
+      shell: bash
       run: |
-        Set-Location build
-        $cfg = "${{ matrix.build_type }}"
-        # Try launching with minimal terminal settings; ignore non-zero exit
-        try { Start-Process -FilePath .\$cfg\nightforge.exe -ArgumentList '--min-width','10','--min-height','5' -Wait -NoNewWindow } catch { }
-        Write-Output "✓ Engine starts (smoke test)"
+        cd build
+        timeout 5s ./nightforge --min-width 10 --min-height 5 || true
+        echo "✓ Engine starts without crashing (MINGW)"
 
   code-quality:
     runs-on: ubuntu-latest

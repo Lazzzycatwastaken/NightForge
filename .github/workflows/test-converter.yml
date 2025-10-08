@@ -56,46 +56,33 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Attempt to install ImageMagick
-      shell: pwsh
+    - name: Set up MSYS2 (MINGW64)
+      uses: msys2/setup-msys2@v2
+      with:
+        msystem: MINGW64
+
+    - name: Install dependencies
+      shell: bash
       run: |
-        try {
-          choco install imagemagick -y
-        } catch {
-          Write-Warning "choco or ImageMagick not available in runner, some tests may be skipped"
-        }
+        pacman --noconfirm -Syuu
+        pacman --noconfirm -S --needed mingw-w64-x86_64-toolchain mingw-w64-x86_64-cmake mingw-w64-x86_64-imagemagick
+        echo "export PATH=/mingw64/bin:$PATH" >> $GITHUB_ENV
 
     - name: Build converter
       shell: bash
       run: |
         mkdir build && cd build
         cmake ..
-        cmake --build . --config Release --target webp_to_ascii -- /m
+        make -j$(nproc) webp_to_ascii
 
     - name: Test ASCII conversion
-      shell: pwsh
+      shell: bash
       run: |
-        Set-Location build\Release
-        $exe = Join-Path (Get-Location) "webp_to_ascii.exe"
-        if (-not (Test-Path $exe)) { Write-Warning "webp_to_ascii.exe not found; skipping test"; exit 0 }
-        # Create a small PNG using PowerShell's built-in methods if ImageMagick not available
-        $testPng = "$(Get-Location)\..\test.png"
-        if (-not (Test-Path $testPng)) {
-          try {
-            Add-Type -AssemblyName System.Drawing
-            $bmp = New-Object System.Drawing.Bitmap 64,32
-            $g = [System.Drawing.Graphics]::FromImage($bmp)
-            $g.Clear([System.Drawing.Color]::White)
-            $font = New-Object System.Drawing.Font 'Arial', 20
-            $brush = [System.Drawing.Brushes]::Black
-            $g.DrawString('TEST', $font, $brush, 5,5)
-            $bmp.Save($testPng, [System.Drawing.Imaging.ImageFormat]::Png)
-            $g.Dispose(); $bmp.Dispose()
-          } catch {
-            Write-Warning "Could not create test PNG; skipping converter test"
-            exit 0
-          }
-        }
-
-        & .\webp_to_ascii.exe ..\test.png clean no 40
-        Write-Output "✓ ASCII conversion successful on Windows"
+        cd build
+        if [ ! -f webp_to_ascii ]; then echo "webp_to_ascii not found; skipping"; exit 0; fi
+        # Create a small PNG using ImageMagick (available via pacman) or fallback to converting a simple PPM
+        convert -size 64x32 xc:white -fill black -gravity center -pointsize 20 -annotate +0+0 "TEST" ../test.png || (
+          printf "P3\n64 32\n255\n" > ../test.ppm && for i in {1..2048}; do echo "255 255 255" >> ../test.ppm; done && convert ../test.ppm ../test.png
+        )
+        ./webp_to_ascii ../test.png clean no 40
+        echo "✓ ASCII conversion successful on Windows (MINGW)"
