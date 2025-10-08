@@ -166,7 +166,7 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
         &&op_JUMP,            // OP_JUMP
         &&op_JUMP_IF_FALSE,   // OP_JUMP_IF_FALSE
         &&op_JUMP_BACK,       // OP_JUMP_BACK
-        &&op_CALL,            // OP_CALL
+        // OP_CALL removed - was unused
         &&op_CALL_HOST,       // OP_CALL_HOST
         &&op_TAIL_CALL,       // OP_TAIL_CALL
         &&op_RETURN,          // OP_RETURN
@@ -482,11 +482,6 @@ op_JUMP_IF_FALSE: {
 op_JUMP_BACK: {
     COUNT_OPCODE(OP_JUMP_BACK);
     uint8_t offset = read_byte(ip); ip -= offset; SAFE_DISPATCH();
-}
-
-op_CALL: {
-    COUNT_OPCODE(OP_CALL);
-    SAFE_DISPATCH();
 }
 
 op_CALL_HOST: {
