@@ -171,13 +171,6 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
         &&op_POP,             // OP_POP
         &&op_PRINT,           // OP_PRINT
         &&op_PRINT_SPACE,     // OP_PRINT_SPACE
-        &&op_CONSTANT_R,      // OP_CONSTANT_R
-        &&op_GET_LOCAL_R,     // OP_GET_LOCAL_R
-        &&op_PUSH_REG,        // OP_PUSH_REG
-
-        &&op_ADD_INT_R,       // OP_ADD_INT_R
-        &&op_ADD_FLOAT_R,     // OP_ADD_FLOAT_R
-        &&op_ADD_STRING_R,    // OP_ADD_STRING_R
 
         &&op_ADD_LOCAL,       // OP_ADD_LOCAL
         &&op_ADD_FLOAT_LOCAL, // OP_ADD_FLOAT_LOCAL
@@ -721,46 +714,6 @@ op_PRINT_SPACE: {
         switch (value.type()) { case ValueType::NIL: std::cout << "nil"; break; case ValueType::BOOL: std::cout << (value.as_boolean() ? "true" : "false"); break; case ValueType::INT: std::cout << value.as_integer(); break; case ValueType::FLOAT: std::cout << value.as_floating(); break; case ValueType::STRING_ID: std::cout << strings_.get_string(value.as_string_id()); break; default: std::cout << "unknown"; break; }
     }
     std::cout << " "; SAFE_DISPATCH();
-}
-
-op_CONSTANT_R: {
-    COUNT_OPCODE(OP_CONSTANT_R);
-    uint8_t dest = read_byte(ip); uint8_t idx = read_byte(ip); Value constant = chunk.get_constant(idx); if (dest < REG_COUNT) registers_[dest] = constant; SAFE_DISPATCH();
-}
-
-op_GET_LOCAL_R: {
-    COUNT_OPCODE(OP_GET_LOCAL_R);
-    uint8_t dest = read_byte(ip); uint8_t idx = read_byte(ip); if (local_frame_bases_.empty()) { runtime_error("No local frame for GET_LOCAL_R"); return VMResult::RUNTIME_ERROR; } size_t base = local_frame_bases_.back(); size_t abs = base + static_cast<size_t>(idx); if (abs >= param_stack_.size()) { runtime_error("Local index out of range for GET_LOCAL_R"); return VMResult::RUNTIME_ERROR; } if (dest < REG_COUNT) registers_[dest] = param_stack_[abs]; SAFE_DISPATCH();
-}
-
-op_PUSH_REG: {
-    COUNT_OPCODE(OP_PUSH_REG);
-    uint8_t reg = read_byte(ip); if (reg >= REG_COUNT) { runtime_error("Invalid register in PUSH_REG"); return VMResult::RUNTIME_ERROR; } push(registers_[reg]); SAFE_DISPATCH();
-}
-
-op_ADD_INT_R: {
-    COUNT_OPCODE(OP_ADD_INT_R);
-    uint8_t dest = read_byte(ip); uint8_t s1 = read_byte(ip); uint8_t s2 = read_byte(ip); int64_t a = registers_[s1].as_integer(); int64_t b = registers_[s2].as_integer(); if (dest < REG_COUNT) registers_[dest] = Value::integer(a + b); SAFE_DISPATCH();
-}
-
-op_ADD_FLOAT_R: {
-    COUNT_OPCODE(OP_ADD_FLOAT_R);
-    uint8_t dest = read_byte(ip); uint8_t s1 = read_byte(ip); uint8_t s2 = read_byte(ip); double a = registers_[s1].as_floating(); double b = registers_[s2].as_floating(); if (dest < REG_COUNT) registers_[dest] = Value::floating(a + b); SAFE_DISPATCH();
-}
-
-op_ADD_STRING_R: {
-    COUNT_OPCODE(OP_ADD_STRING_R);
-    uint8_t dest = read_byte(ip);
-    uint8_t s1 = read_byte(ip);
-    uint8_t s2 = read_byte(ip);
-    {
-        std::string sa = value_to_string(registers_[s1]);
-        std::string sb = value_to_string(registers_[s2]);
-        uint32_t buf = buffers_.create_from_two(sa, sb);
-        if (dest < REG_COUNT) registers_[dest] = Value::buffer_id(buf);
-        bytes_allocated_since_gc_ += buffers_.get_buffer(buf).length();
-    }
-    SAFE_DISPATCH();
 }
 
 op_ADD_LOCAL: {

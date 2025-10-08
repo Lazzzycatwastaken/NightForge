@@ -62,13 +62,6 @@ enum class OpCode : uint8_t {
     OP_POP,          // pop top of stack
     OP_PRINT,        // debug print (for now)
     OP_PRINT_SPACE,  // print with space separator
-    OP_CONSTANT_R,
-    OP_GET_LOCAL_R,
-    OP_PUSH_REG,
-
-    OP_ADD_INT_R,
-    OP_ADD_FLOAT_R,
-    OP_ADD_STRING_R,
 
     OP_ADD_LOCAL,
     OP_ADD_FLOAT_LOCAL,

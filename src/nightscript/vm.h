@@ -104,9 +104,6 @@ private:
     Value peek(int distance = 0);
     void reset_stack();
 
-    static constexpr size_t REG_COUNT = 256;
-    Value registers_[REG_COUNT];
-
     // Error state
     bool has_runtime_error_ = false;
     
