@@ -1,6 +1,7 @@
 #pragma once
 #include "config.h"
 #include "terminal.h"
+#include "runtime.h"
 #include "../rendering/tui_renderer.h"
 #include "../nightscript/vm.h"
 #include "../nightscript/compiler.h"
@@ -20,6 +21,7 @@ private:
     Config config_;
     bool running_;
     std::unique_ptr<TUIRenderer> renderer_;
+    std::unique_ptr<Runtime> runtime_;
     std::unique_ptr<nightscript::VM> vm_;
     std::unique_ptr<nightscript::HostEnvironment> host_env_impl_;
     std::unique_ptr<Terminal> terminal_;

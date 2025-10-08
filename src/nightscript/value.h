@@ -21,7 +21,6 @@ enum class OpCode : uint8_t {
     OP_SET_GLOBAL,   // set global variable
     OP_GET_LOCAL,    // get local variable
     OP_SET_LOCAL,    // set local variable
-    
     // Arithmetic - Generic
     OP_ADD,
     OP_SUBTRACT,
@@ -53,7 +52,7 @@ enum class OpCode : uint8_t {
     OP_JUMP,         // unconditional jump
     OP_JUMP_IF_FALSE, // conditional jump
     OP_JUMP_BACK,    // jump backwards (for loops)
-    OP_CALL,         // call host function
+    // OP_CALL removed useless
     OP_CALL_HOST,    // call host function with name
     OP_TAIL_CALL,    // optimized tail call
     OP_RETURN,       // return from function

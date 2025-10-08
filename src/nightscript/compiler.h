@@ -18,12 +18,24 @@ enum class InferredType {
 
 class Compiler {
 public:
+    // Performance stats
+    struct CompileStats {
+        size_t specialized_ops_emitted = 0;
+        size_t generic_ops_emitted = 0;
+        size_t tail_calls_optimized = 0;
+        size_t constant_folds = 0;
+        size_t jump_threads_applied = 0;
+    };
+
     Compiler();
     
     bool compile(const std::string& source, Chunk& chunk, StringTable& strings);
     
     bool load_cached_bytecode(const std::string& source_path, Chunk& chunk, StringTable& strings);
     void save_bytecode_cache(const std::string& source_path, const Chunk& chunk, const StringTable& strings);
+    
+    // Get compilation statistics
+    const CompileStats& get_stats() const { return stats_; }
     
 private:
     std::vector<Token> tokens_;
@@ -36,13 +48,7 @@ private:
     std::vector<std::string> current_local_params_; // names of params when compiling a function
     std::vector<std::string> current_local_locals_;  // names of local variables declared inside current function
     
-    // Performance stats
-    struct CompileStats {
-        size_t specialized_ops_emitted = 0;
-        size_t generic_ops_emitted = 0;
-        size_t tail_calls_optimized = 0;
-        size_t constant_folds = 0;
-    } stats_;
+    CompileStats stats_;
     
     // Parser state
     Token current_token();
@@ -87,9 +93,6 @@ private:
     void set_variable_type(const std::string& name, InferredType type);
     OpCode get_specialized_opcode(TokenType op, InferredType left_type, InferredType right_type);
     void emit_optimized_binary_op(TokenType op, InferredType left_type, InferredType right_type);
-    
-    bool is_tail_position_;
-    void emit_tail_call_optimized(const std::string& func_name, uint8_t arg_count);
     
     // Bytecode emission
     void emit_byte(uint8_t byte);

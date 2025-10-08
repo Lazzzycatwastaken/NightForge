@@ -10,7 +10,7 @@ namespace nightforge {
 namespace nightscript {
 
 Compiler::Compiler() : current_(0), chunk_(nullptr), strings_(nullptr), 
-                      last_expression_type_(InferredType::UNKNOWN), is_tail_position_(false),
+                      last_expression_type_(InferredType::UNKNOWN),
                       had_error_(false), panic_mode_(false) {
 }
 
@@ -800,35 +800,115 @@ void Compiler::emit_return() {
 void Compiler::thread_jumps() {
     const auto& code = chunk_->code();
     size_t n = code.size();
+    
+    // Lua 5.4 style aggressive jump threading
+    // Can optimize both unconditional jumps and conditional jumps leading to jumps
+    // Problem with this is that the compiler already builds very efficient jumps so this doesn't get used much, wow.
+    size_t total_jumps_found = 0;
     for (size_t i = 0; i + 1 < n; ++i) {
         uint8_t instr = code[i];
-        if (instr != static_cast<uint8_t>(OpCode::OP_JUMP) && instr != static_cast<uint8_t>(OpCode::OP_JUMP_IF_FALSE)) continue;
+        if (instr != static_cast<uint8_t>(OpCode::OP_JUMP) && 
+            instr != static_cast<uint8_t>(OpCode::OP_JUMP_IF_FALSE)) {
+            continue;
+        }
+        
+        total_jumps_found++;
+        
+        // Debug: print jump details
+        // std::cout << "Jump at " << i << ": " 
+        //          << (instr == static_cast<uint8_t>(OpCode::OP_JUMP) ? "OP_JUMP" : "OP_JUMP_IF_FALSE");
 
         size_t offset_idx = i + 1;
         if (offset_idx >= n) continue;
         uint8_t off = code[offset_idx];
         size_t dest = offset_idx + static_cast<size_t>(off);
+        
+        std::cout << " -> " << dest;
+        if (dest < n) {
+            uint8_t target_instr = code[dest];
+            if (target_instr == static_cast<uint8_t>(OpCode::OP_JUMP)) {
+                std::cout << " (target: OP_JUMP)";
+            } else if (target_instr == static_cast<uint8_t>(OpCode::OP_JUMP_IF_FALSE)) {
+                std::cout << " (target: OP_JUMP_IF_FALSE)";
+            } else {
+                std::cout << " (target: op" << static_cast<int>(target_instr) << ")";
+            }
+        }
+        std::cout << std::endl;
 
-        // Follow unconditional jump chains only (safe)
         int follow = 0;
-        while (dest < n && follow < 32) {
-            uint8_t at = code[dest];
-            if (at != static_cast<uint8_t>(OpCode::OP_JUMP)) break;
-            // read the next jump's offset
-            if (dest + 1 >= n) break;
-            uint8_t next_off = code[dest + 1];
-            size_t next_dest = dest + 1 + static_cast<size_t>(next_off);
-            if (next_dest == dest) break; // degenerate
-            dest = next_dest;
-            ++follow;
+        size_t original_dest = dest;
+        
+        while (dest < n && follow < 64) {
+            uint8_t target_instr = code[dest];
+            
+            if (target_instr == static_cast<uint8_t>(OpCode::OP_JUMP)) {
+                if (dest + 1 >= n) break;
+                uint8_t next_off = code[dest + 1];
+                size_t next_dest = dest + 1 + static_cast<size_t>(next_off);
+                if (next_dest == dest) break; // Avoid infinite loops
+                dest = next_dest;
+                ++follow;
+                continue;
+            }
+            
+            if (target_instr == static_cast<uint8_t>(OpCode::OP_JUMP_IF_FALSE)) {
+                
+                if (instr == static_cast<uint8_t>(OpCode::OP_JUMP_IF_FALSE)) {
+                    if (dest + 1 >= n) break;
+                    uint8_t next_off = code[dest + 1];
+                    size_t next_dest = dest + 1 + static_cast<size_t>(next_off);
+                    if (next_dest == dest) break;
+                    dest = next_dest;
+                    ++follow;
+                    continue;
+                }
+
+                if (dest + 2 < n) {
+                    size_t cond_target = dest + 1 + static_cast<size_t>(code[dest + 1]);
+                    if (cond_target < n && code[cond_target] == static_cast<uint8_t>(OpCode::OP_JUMP)) {
+                        if (cond_target + 1 < n) {
+                            size_t final_target = cond_target + 1 + static_cast<size_t>(code[cond_target + 1]);
+                            if (final_target != dest && final_target < n) {
+                                dest = final_target;
+                                ++follow;
+                                continue;
+                            }
+                        }
+                    }
+                }
+            }
+            
+            if (target_instr == static_cast<uint8_t>(OpCode::OP_POP)) {
+                dest++;
+                ++follow;
+                continue;
+            }
+            
+            if (target_instr == static_cast<uint8_t>(OpCode::OP_RETURN)) {
+                break;
+            }
+            
+            break;
         }
 
-        if (dest >= n) dest = n - 1; // clamp
-        // compute new offset relative to the original offset byte
-        size_t new_off_sz = dest - offset_idx;
-        uint8_t new_off = (new_off_sz > 255) ? 255 : static_cast<uint8_t>(new_off_sz);
-        chunk_->patch_byte(offset_idx, new_off);
+        if (dest != original_dest && dest < n) {
+            if (dest >= offset_idx) {
+                size_t new_off_sz = dest - offset_idx;
+                uint8_t new_off = (new_off_sz > 255) ? 255 : static_cast<uint8_t>(new_off_sz);
+                chunk_->patch_byte(offset_idx, new_off);
+                stats_.jump_threads_applied++;
+                
+                #ifdef DEBUG_JUMP_THREADING
+                std::cout << "Jump threading: " << i << " -> " << dest << " (saved " << (dest - original_dest) << " steps)" << std::endl;
+                #endif
+            }
+        }
     }
+    
+    // Debug output
+    std::cout << "Jump threading analysis: " << total_jumps_found << " jumps found, " 
+              << stats_.jump_threads_applied << " optimizations applied" << std::endl;
 }
 
 void Compiler::error(const char* message) {
@@ -1106,23 +1186,6 @@ void Compiler::emit_optimized_binary_op(TokenType op, InferredType left_type, In
     }
 
     emit_byte(static_cast<uint8_t>(specialized_op));
-}
-
-void Compiler::emit_tail_call_optimized(const std::string& func_name, uint8_t arg_count) {
-    // For tail calls, we can reuse the current stack frame
-    // Instead of pushing a new frame replace the current one
-    
-    if (is_tail_position_) {
-        size_t name_const = chunk_->add_constant(Value::string_id(strings_->intern(func_name)));
-        emit_bytes(static_cast<uint8_t>(OpCode::OP_CALL_HOST), static_cast<uint8_t>(name_const));
-        emit_byte(arg_count);
-        emit_byte(1);
-        stats_.tail_calls_optimized++;
-    } else {
-        size_t name_const = chunk_->add_constant(Value::string_id(strings_->intern(func_name)));
-        emit_bytes(static_cast<uint8_t>(OpCode::OP_CALL_HOST), static_cast<uint8_t>(name_const));
-        emit_byte(arg_count);
-    }
 }
 
 bool Compiler::load_cached_bytecode(const std::string& source_path, Chunk& chunk, StringTable& strings) {

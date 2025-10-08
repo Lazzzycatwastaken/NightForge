@@ -41,6 +41,7 @@ Engine::Engine(const Config& config)
     : config_(config), running_(false), current_size_{0, 0} {
     host_env_impl_ = std::make_unique<EngineHost>();
     vm_ = std::make_unique<nightscript::VM>(host_env_impl_.get());
+    runtime_ = std::make_unique<Runtime>(vm_.get());
     terminal_ = std::unique_ptr<Terminal>(create_terminal());
     
     setup_host_functions();
@@ -251,7 +252,7 @@ void Engine::execute_script_file(const std::string& filename) {
     // Execute the chunk (whether from cache or freshly compiled)
     std::cout << "Executing..." << std::endl;
     
-    nightscript::VMResult result = vm_->execute(chunk);
+    nightscript::VMResult result = runtime_->execute_bytecode(chunk);
     
     switch (result) {
         case nightscript::VMResult::OK:
@@ -270,13 +271,13 @@ void Engine::execute_script_file(const std::string& filename) {
         uint64_t c = vm_->stats.op_counts[i];
         if (c > 0) ops.emplace_back(i, c);
     }
-    std::sort(ops.begin(), ops.end(), [](const auto &a, const auto &b){ return a.second > b.second; });
-    std::cout << "--- Opcode hotspots ---" << std::endl;
-    int printed = 0;
-    for (auto &p : ops) {
-        std::cout << "op=" << p.first << " count=" << p.second << std::endl;
-        if (++printed >= 10) break;
-    }
+    // std::sort(ops.begin(), ops.end(), [](const auto &a, const auto &b){ return a.second > b.second; });
+    // std::cout << "--- Opcode hotspots ---" << std::endl;
+    // int printed = 0;
+    // for (auto &p : ops) {
+    //     std::cout << "op=" << p.first << " count=" << p.second << std::endl;
+    //     if (++printed >= 10) break;
+    // }
 
     std::cout << "=== Script Complete ===" << std::endl;
 }

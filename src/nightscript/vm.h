@@ -62,6 +62,11 @@ public:
     // Debug
     void print_stack();
     
+    // Performance monitoring
+    void reset_stats() { 
+        stats = Stats{}; // Reset to default values
+    }
+    
     // Performance counters
     struct Stats {
         size_t gc_collections = 0;
