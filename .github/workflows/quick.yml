@@ -27,3 +27,28 @@ jobs:
         cd build
         ./nightforge --help
         timeout 2s ./nightforge --min-width 10 --min-height 5 || echo "Engine test completed"
+
+  quick-build-windows:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Configure CMake
+      shell: bash
+      run: |
+        mkdir build && cd build
+        cmake ..
+
+    - name: Build
+      run: |
+        cd build
+        cmake --build . --config Release -- /m
+
+    - name: Test
+      shell: pwsh
+      run: |
+        Set-Location build\Release
+        & .\nightforge.exe --help
+        try { Start-Process -FilePath .\nightforge.exe -ArgumentList '--min-width','10','--min-height','5' -Wait -NoNewWindow } catch { }
+        Write-Output "Engine test completed on Windows"

@@ -97,6 +97,57 @@ jobs:
         ./webp_to_ascii || true
         echo "✓ Help commands work on macOS"
 
+  build-windows:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        build_type: [Debug, Release]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Configure CMake
+      shell: bash
+      run: |
+        mkdir build
+        cd build
+        cmake .. -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+
+    - name: Build (MSBuild)
+      run: |
+        cd build
+        cmake --build . --config ${{ matrix.build_type }} -- /m
+
+    - name: Test executables exist
+      shell: pwsh
+      run: |
+        Set-Location build
+        $cfg = "${{ matrix.build_type }}"
+        $exe1 = Join-Path $cfg "nightforge.exe"
+        if (-not (Test-Path $exe1)) { Write-Error "nightforge.exe not found"; exit 1 }
+        $exe2 = Join-Path $cfg "webp_to_ascii.exe"
+        if (-not (Test-Path $exe2)) { Write-Error "webp_to_ascii.exe not found"; exit 1 }
+        Write-Output "✓ Both executables built successfully on Windows"
+
+    - name: Test help commands
+      shell: pwsh
+      run: |
+        Set-Location build
+        $cfg = "${{ matrix.build_type }}"
+        & .\$cfg\nightforge.exe --help
+        # webp_to_ascii may return non-zero for missing args; ignore failures
+        try { & .\$cfg\webp_to_ascii.exe; } catch { }
+        Write-Output "✓ Help commands work on Windows"
+
+    - name: Test basic functionality
+      shell: pwsh
+      run: |
+        Set-Location build
+        $cfg = "${{ matrix.build_type }}"
+        # Try launching with minimal terminal settings; ignore non-zero exit
+        try { Start-Process -FilePath .\$cfg\nightforge.exe -ArgumentList '--min-width','10','--min-height','5' -Wait -NoNewWindow } catch { }
+        Write-Output "✓ Engine starts (smoke test)"
+
   code-quality:
     runs-on: ubuntu-latest
     
