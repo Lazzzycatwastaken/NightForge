@@ -5,8 +5,6 @@
 #include <algorithm>
 
 namespace nightforge {
-
-#ifdef _WIN32
 Runtime::Runtime()
     : vm_(std::make_unique<nightscript::VM>()),
       external_vm_(nullptr),
