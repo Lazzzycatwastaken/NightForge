@@ -563,16 +563,28 @@ op_CALL_HOST: {
                 push(arg);
             }
             
-            Value* pre_call_stack_top = stack_top_ - arg_count;
+            // Store stack state before call for proper cleanup  
+            Value* stack_before_call = stack_top_ - arg_count;
+            size_t initial_call_frames = call_frames_.size();
             
             push_call_frame(&fchunk, arg_count);
             VMResult r = execute(fchunk, parent_chunk);
             pop_call_frame();
             
-            if (r == VMResult::OK && stack_top_ > pre_call_stack_top) {
-                Value return_value = stack_top_[-1];
-                stack_top_ = pre_call_stack_top;
-                push(return_value);
+            if (call_frames_.size() != initial_call_frames) {
+                runtime_error("Call frame stack imbalance");
+                return VMResult::RUNTIME_ERROR;
+            }
+            
+            if (r == VMResult::OK) {
+                if (stack_top_ > stack_before_call + 1) {
+                    Value return_value = stack_top_[-1];
+                    stack_top_ = stack_before_call;
+                    push(return_value);
+                } else if (stack_top_ <= stack_before_call) {
+                    stack_top_ = stack_before_call;
+                    push(Value::nil());
+                } 
             }
             
             if (r != VMResult::OK) return r;
@@ -627,16 +639,22 @@ op_TAIL_CALL: {
             push(arg);
         }
         
-        Value* pre_call_stack_top = stack_top_ - arg_count;
+        // Store stack state before call for proper cleanup
+        Value* stack_before_call = stack_top_ - arg_count;
         
         push_call_frame(&fchunk, arg_count);
         VMResult r = execute(fchunk, &chunk);
         pop_call_frame();
         
-        if (r == VMResult::OK && stack_top_ > pre_call_stack_top) {
-            Value return_value = stack_top_[-1];
-            stack_top_ = pre_call_stack_top;
-            push(return_value);
+        if (r == VMResult::OK) {
+            if (stack_top_ > stack_before_call + 1) {
+                Value return_value = stack_top_[-1];
+                stack_top_ = stack_before_call;
+                push(return_value);
+            } else if (stack_top_ <= stack_before_call) {
+                stack_top_ = stack_before_call;
+                push(Value::nil());
+            } 
         }
         
         if (r != VMResult::OK) return r;

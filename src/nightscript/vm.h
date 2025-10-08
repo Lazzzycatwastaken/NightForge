@@ -88,7 +88,7 @@ private:
     Value* get_local(uint8_t slot);  // Direct shot
     
 private:
-    static constexpr size_t STACK_MAX = 16384; // those who know
+    static constexpr size_t STACK_MAX = 262144; // Increased to 256K for deep recursion support
     static constexpr size_t GC_THRESHOLD = 1024 * 1024; // 1MB threshold for GC
     
     Value stack_[STACK_MAX];
