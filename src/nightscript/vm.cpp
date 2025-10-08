@@ -19,6 +19,7 @@ namespace nightscript {
 
 VM::VM(HostEnvironment* host_env) {
     host_env_ = host_env;
+    current_frame_ = nullptr;
     reset_stack();
     tmp_args_.reserve(16);
 }
@@ -119,6 +120,8 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
     
     // Computed-goto dispatch implementation (actual cancer to do jesus)
     // The dispatch table MUST exactly match the OpCode enum order.
+
+    //I really should number these opcodes
     
     // macros
     #define DISPATCH() goto *dispatch_table[read_byte(ip)]
@@ -223,14 +226,12 @@ op_GET_GLOBAL: {
     }
     uint32_t sid = variable_name.as_string_id();
     {
-        std::string var_name = strings_.get_string(sid);
-        Value local_val;
-        if (local_lookup(var_name, local_val)) {
-            push(local_val);
+        auto it = globals_by_id_.find(sid);
+        if (it != globals_by_id_.end()) {
+            push(it->second);
         } else {
-            auto it = globals_by_id_.find(sid);
-            if (it != globals_by_id_.end()) push(it->second);
-            else push(get_global(var_name));
+            std::string var_name = strings_.get_string(sid);
+            push(get_global(var_name));
         }
     }
     SAFE_DISPATCH();
@@ -247,14 +248,6 @@ op_SET_GLOBAL: {
     Value value = peek();
     {
         std::string var_name = strings_.get_string(sid);
-        if (!local_frames_.empty()) {
-            const auto& frame = local_frames_.back();
-            auto it = frame.find(var_name);
-            if (it != frame.end()) {
-                size_t idx = it->second;
-                if (idx < param_stack_.size()) { param_stack_[idx] = value; SAFE_DISPATCH(); }
-            }
-        }
         globals_by_id_[sid] = value;
         globals_[var_name] = value;
     }
@@ -263,36 +256,25 @@ op_SET_GLOBAL: {
 
 op_GET_LOCAL: {
     COUNT_OPCODE(OP_GET_LOCAL);
-    uint8_t idx = read_byte(ip);
-    if (local_frame_bases_.empty()) {
-        runtime_error("No local frame for GET_LOCAL");
+    uint8_t slot = read_byte(ip);
+    Value* local_ptr = get_local(slot);
+    if (!local_ptr) {
+        runtime_error("Local slot %d out of range", slot);
         return VMResult::RUNTIME_ERROR;
     }
-    size_t base = local_frame_bases_.back();
-    size_t abs = base + static_cast<size_t>(idx);
-    if (abs >= param_stack_.size()) {
-        runtime_error("Local index out of range");
-        return VMResult::RUNTIME_ERROR;
-    }
-    push(param_stack_[abs]);
+    push(*local_ptr);
     SAFE_DISPATCH();
 }
 
 op_SET_LOCAL: {
     COUNT_OPCODE(OP_SET_LOCAL);
-    uint8_t idx = read_byte(ip);
-    if (local_frame_bases_.empty()) {
-        runtime_error("No local frame for SET_LOCAL");
+    uint8_t slot = read_byte(ip);
+    Value* local_ptr = get_local(slot);
+    if (!local_ptr) {
+        runtime_error("Local slot %d out of range", slot);
         return VMResult::RUNTIME_ERROR;
     }
-    size_t base = local_frame_bases_.back();
-    size_t abs = base + static_cast<size_t>(idx);
-    Value value = peek();
-    if (abs >= param_stack_.size()) {
-        runtime_error("Local index out of range for SET_LOCAL");
-        return VMResult::RUNTIME_ERROR;
-    }
-    param_stack_[abs] = value;
+    *local_ptr = peek();  // Set local without popping
     SAFE_DISPATCH();
 }
 
@@ -328,15 +310,11 @@ op_MODULO: {
 
 op_ADD_INT: {
     COUNT_OPCODE(OP_ADD_INT);
-    if (stack_top_ - stack_ >= 2) {
-        int64_t a_val = stack_top_[-2].as_integer();
-        int64_t b_val = stack_top_[-1].as_integer();
-        stack_top_ -= 2;
-        push(Value::integer(a_val + b_val));
-    } else {
-        Value b = pop(); Value a = pop();
-        push(Value::integer(a.as_integer() + b.as_integer()));
-    }
+    // Direct shot access (stack ahtually!! 🤓)
+    int64_t a_val = stack_top_[-2].as_integer();
+    int64_t b_val = stack_top_[-1].as_integer();
+    stack_top_ -= 2;
+    push(Value::integer(a_val + b_val));
     SAFE_DISPATCH();
 }
 
@@ -385,14 +363,10 @@ op_ADD_STRING: {
 
 op_SUB_INT: {
     COUNT_OPCODE(OP_SUB_INT);
-    if (stack_top_ - stack_ >= 2) {
-        int64_t a_val = stack_top_[-2].as_integer();
-        int64_t b_val = stack_top_[-1].as_integer();
-        stack_top_ -= 2;
-        push(Value::integer(a_val - b_val));
-    } else {
-        Value b = pop(); Value a = pop(); push(Value::integer(a.as_integer() - b.as_integer()));
-    }
+    int64_t a_val = stack_top_[-2].as_integer();
+    int64_t b_val = stack_top_[-1].as_integer();
+    stack_top_ -= 2;
+    push(Value::integer(a_val - b_val));
     SAFE_DISPATCH();
 }
 
@@ -411,14 +385,10 @@ op_SUB_FLOAT: {
 
 op_MUL_INT: {
     COUNT_OPCODE(OP_MUL_INT);
-    if (stack_top_ - stack_ >= 2) {
-        int64_t a_val = stack_top_[-2].as_integer();
-        int64_t b_val = stack_top_[-1].as_integer();
-        stack_top_ -= 2;
-        push(Value::integer(a_val * b_val));
-    } else {
-        Value b = pop(); Value a = pop(); push(Value::integer(a.as_integer() * b.as_integer()));
-    }
+    int64_t a_val = stack_top_[-2].as_integer();
+    int64_t b_val = stack_top_[-1].as_integer();
+    stack_top_ -= 2;
+    push(Value::integer(a_val * b_val));
     SAFE_DISPATCH();
 }
 
@@ -437,15 +407,11 @@ op_MUL_FLOAT: {
 
 op_DIV_INT: {
     COUNT_OPCODE(OP_DIV_INT);
-    if (stack_top_ - stack_ >= 2) {
-        int64_t a_val = stack_top_[-2].as_integer();
-        int64_t b_val = stack_top_[-1].as_integer();
-        stack_top_ -= 2;
-        if (b_val == 0) { runtime_error("Division by zero"); return VMResult::RUNTIME_ERROR; }
-        push(Value::integer(a_val / b_val));
-    } else {
-        Value b = pop(); Value a = pop(); if (b.as_integer() == 0) { runtime_error("Division by zero"); return VMResult::RUNTIME_ERROR; } push(Value::integer(a.as_integer() / b.as_integer()));
-    }
+    int64_t a_val = stack_top_[-2].as_integer();
+    int64_t b_val = stack_top_[-1].as_integer();
+    stack_top_ -= 2;
+    if (b_val == 0) { runtime_error("Division by zero"); return VMResult::RUNTIME_ERROR; }
+    push(Value::integer(a_val / b_val));
     SAFE_DISPATCH();
 }
 
@@ -465,15 +431,11 @@ op_DIV_FLOAT: {
 
 op_MOD_INT: {
     COUNT_OPCODE(OP_MOD_INT);
-    if (stack_top_ - stack_ >= 2) {
-        int64_t a_val = stack_top_[-2].as_integer();
-        int64_t b_val = stack_top_[-1].as_integer();
-        stack_top_ -= 2;
-        if (b_val == 0) { runtime_error("Modulo by zero"); return VMResult::RUNTIME_ERROR; }
-        push(Value::integer(a_val % b_val));
-    } else {
-        Value b = pop(); Value a = pop(); if (b.as_integer() == 0) { runtime_error("Modulo by zero"); return VMResult::RUNTIME_ERROR; } push(Value::integer(a.as_integer() % b.as_integer()));
-    }
+    int64_t a_val = stack_top_[-2].as_integer();
+    int64_t b_val = stack_top_[-1].as_integer();
+    stack_top_ -= 2;
+    if (b_val == 0) { runtime_error("Modulo by zero"); return VMResult::RUNTIME_ERROR; }
+    push(Value::integer(a_val % b_val));
     SAFE_DISPATCH();
 }
 
@@ -576,25 +538,19 @@ op_CALL_HOST: {
     func_index = chunk.get_function_index(func_name_lc);
     if (func_index >= 0) {
         const Chunk& fchunk = chunk.get_function(static_cast<size_t>(func_index));
-        const std::vector<std::string>& locals_combined = chunk.get_function_local_names(static_cast<size_t>(func_index));
-
-        push_local_frame(locals_combined, tmp_args_);
-        Value* saved_stack_top = stack_top_;
-        VMResult r = execute(fchunk, &chunk);
-        pop_local_frame();
-
-        if (r != VMResult::OK) return r;
-
-        if (stack_top_ <= stack_) push(Value::nil());
-
-        Value return_value = pop();
-        if (return_value.type() == ValueType::STRING_BUFFER) {
-            uint32_t sid = strings_.intern(buffers_.get_buffer(return_value.as_buffer_id()));
-            return_value = Value::string_id(sid);
+        
+        for (const Value& arg : tmp_args_) {
+            push(arg);
         }
-
-        stack_top_ = saved_stack_top;
-        push(return_value);
+        
+        push_call_frame(&fchunk, arg_count);
+        
+        VMResult r = execute(fchunk, &chunk);
+        
+        pop_call_frame();
+        
+        if (r != VMResult::OK) return r;
+        
         SAFE_DISPATCH();
     }
 
@@ -602,24 +558,25 @@ op_CALL_HOST: {
         ssize_t parent_func_index = parent_chunk->get_function_index(func_name_lc);
         if (parent_func_index >= 0) {
             const Chunk& fchunk = parent_chunk->get_function(static_cast<size_t>(parent_func_index));
-            const std::vector<std::string>& locals_combined = parent_chunk->get_function_local_names(static_cast<size_t>(parent_func_index));
-
-            push_local_frame(locals_combined, tmp_args_);
-            Value* saved_stack_top = stack_top_;
-            VMResult r = execute(fchunk, parent_chunk);
-            pop_local_frame();
-
-            if (r != VMResult::OK) return r;
-            if (stack_top_ <= stack_) push(Value::nil());
-
-            Value return_value = pop();
-            if (return_value.type() == ValueType::STRING_BUFFER) {
-                uint32_t sid = strings_.intern(buffers_.get_buffer(return_value.as_buffer_id()));
-                return_value = Value::string_id(sid);
+            
+            for (const Value& arg : tmp_args_) {
+                push(arg);
             }
-
-            stack_top_ = saved_stack_top;
-            push(return_value);
+            
+            Value* pre_call_stack_top = stack_top_ - arg_count;
+            
+            push_call_frame(&fchunk, arg_count);
+            VMResult r = execute(fchunk, parent_chunk);
+            pop_call_frame();
+            
+            if (r == VMResult::OK && stack_top_ > pre_call_stack_top) {
+                Value return_value = stack_top_[-1];
+                stack_top_ = pre_call_stack_top;
+                push(return_value);
+            }
+            
+            if (r != VMResult::OK) return r;
+            
             SAFE_DISPATCH();
         }
     }
@@ -664,13 +621,26 @@ op_TAIL_CALL: {
 
     ssize_t func_index = chunk.get_function_index(func_name_lc);
     if (func_index >= 0) {
-        const std::vector<std::string>& locals_combined = chunk.get_function_local_names(static_cast<size_t>(func_index));
-        if (!local_frames_.empty()) pop_local_frame();
-        push_local_frame(locals_combined, tmp_args_);
+        const Chunk& fchunk = chunk.get_function(static_cast<size_t>(func_index));
 
-        ip = chunk.code().data();
-        if (ip >= end) return VMResult::OK;
-        DISPATCH();
+        for (const Value& arg : tmp_args_) {
+            push(arg);
+        }
+        
+        Value* pre_call_stack_top = stack_top_ - arg_count;
+        
+        push_call_frame(&fchunk, arg_count);
+        VMResult r = execute(fchunk, &chunk);
+        pop_call_frame();
+        
+        if (r == VMResult::OK && stack_top_ > pre_call_stack_top) {
+            Value return_value = stack_top_[-1];
+            stack_top_ = pre_call_stack_top;
+            push(return_value);
+        }
+        
+        if (r != VMResult::OK) return r;
+        SAFE_DISPATCH();
     }
 
     std::optional<Value> host_result;
@@ -718,15 +688,16 @@ op_PRINT_SPACE: {
 
 op_ADD_LOCAL: {
     COUNT_OPCODE(OP_ADD_LOCAL);
-    uint8_t idx_a = read_byte(ip);
-    uint8_t idx_b = read_byte(ip);
-    if (local_frame_bases_.empty()) { runtime_error("No local frame for OP_ADD_LOCAL"); return VMResult::RUNTIME_ERROR; }
-    size_t base = local_frame_bases_.back();
-    size_t abs_a = base + static_cast<size_t>(idx_a);
-    size_t abs_b = base + static_cast<size_t>(idx_b);
-    if (abs_a >= param_stack_.size() || abs_b >= param_stack_.size()) { runtime_error("Local index out of range for OP_ADD_LOCAL"); return VMResult::RUNTIME_ERROR; }
-    const Value& a = param_stack_[abs_a];
-    const Value& b = param_stack_[abs_b];
+    uint8_t slot_a = read_byte(ip);
+    uint8_t slot_b = read_byte(ip);
+    Value* local_a = get_local(slot_a);
+    Value* local_b = get_local(slot_b);
+    if (!local_a || !local_b) {
+        runtime_error("Local slot out of range for OP_ADD_LOCAL");
+        return VMResult::RUNTIME_ERROR;
+    }
+    const Value& a = *local_a;
+    const Value& b = *local_b;
     if (a.type() == ValueType::INT && b.type() == ValueType::INT) {
         push(Value::integer(a.as_integer() + b.as_integer()));
     } else {
@@ -739,15 +710,16 @@ op_ADD_LOCAL: {
 
 op_ADD_FLOAT_LOCAL: {
     COUNT_OPCODE(OP_ADD_FLOAT_LOCAL);
-    uint8_t idx_a = read_byte(ip);
-    uint8_t idx_b = read_byte(ip);
-    if (local_frame_bases_.empty()) { runtime_error("No local frame for OP_ADD_FLOAT_LOCAL"); return VMResult::RUNTIME_ERROR; }
-    size_t base = local_frame_bases_.back();
-    size_t abs_a = base + static_cast<size_t>(idx_a);
-    size_t abs_b = base + static_cast<size_t>(idx_b);
-    if (abs_a >= param_stack_.size() || abs_b >= param_stack_.size()) { runtime_error("Local index out of range for OP_ADD_FLOAT_LOCAL"); return VMResult::RUNTIME_ERROR; }
-    const Value& va = param_stack_[abs_a];
-    const Value& vb = param_stack_[abs_b];
+    uint8_t slot_a = read_byte(ip);
+    uint8_t slot_b = read_byte(ip);
+    Value* local_a = get_local(slot_a);
+    Value* local_b = get_local(slot_b);
+    if (!local_a || !local_b) {
+        runtime_error("Local slot out of range for OP_ADD_FLOAT_LOCAL");
+        return VMResult::RUNTIME_ERROR;
+    }
+    const Value& va = *local_a;
+    const Value& vb = *local_b;
     double da = (va.type() == ValueType::FLOAT) ? va.as_floating() : static_cast<double>(va.as_integer());
     double db = (vb.type() == ValueType::FLOAT) ? vb.as_floating() : static_cast<double>(vb.as_integer());
     push(Value::floating(da + db));
@@ -756,16 +728,17 @@ op_ADD_FLOAT_LOCAL: {
 
 op_ADD_STRING_LOCAL: {
     COUNT_OPCODE(OP_ADD_STRING_LOCAL);
-    uint8_t idx_a = read_byte(ip);
-    uint8_t idx_b = read_byte(ip);
-    if (local_frame_bases_.empty()) { runtime_error("No local frame for OP_ADD_STRING_LOCAL"); return VMResult::RUNTIME_ERROR; }
-    size_t base = local_frame_bases_.back();
-    size_t abs_a = base + static_cast<size_t>(idx_a);
-    size_t abs_b = base + static_cast<size_t>(idx_b);
-    if (abs_a >= param_stack_.size() || abs_b >= param_stack_.size()) { runtime_error("Local index out of range for OP_ADD_STRING_LOCAL"); return VMResult::RUNTIME_ERROR; }
+    uint8_t slot_a = read_byte(ip);
+    uint8_t slot_b = read_byte(ip);
+    Value* local_a = get_local(slot_a);
+    Value* local_b = get_local(slot_b);
+    if (!local_a || !local_b) {
+        runtime_error("Local slot out of range for OP_ADD_STRING_LOCAL");
+        return VMResult::RUNTIME_ERROR;
+    }
     {
-        std::string sa = value_to_string(param_stack_[abs_a]);
-        std::string sb = value_to_string(param_stack_[abs_b]);
+        std::string sa = value_to_string(*local_a);
+        std::string sb = value_to_string(*local_b);
         uint32_t buf = buffers_.create_from_two(sa, sb);
         push(Value::buffer_id(buf));
         bytes_allocated_since_gc_ += buffers_.get_buffer(buf).length();
@@ -775,18 +748,27 @@ op_ADD_STRING_LOCAL: {
 
 op_CONSTANT_LOCAL: {
     COUNT_OPCODE(OP_CONSTANT_LOCAL);
-    Value vc = read_constant(chunk, ip); uint8_t local_idx = read_byte(ip); if (local_frame_bases_.empty()) { runtime_error("CONSTANT_LOCAL with no frame"); return VMResult::RUNTIME_ERROR; } size_t base = local_frame_bases_.back(); if (base + static_cast<size_t>(local_idx) >= param_stack_.size()) { runtime_error("CONSTANT_LOCAL local index OOB"); return VMResult::RUNTIME_ERROR; } param_stack_[base + static_cast<size_t>(local_idx)] = vc; SAFE_DISPATCH();
+    Value vc = read_constant(chunk, ip);
+    uint8_t slot = read_byte(ip);
+    Value* local_ptr = get_local(slot);
+    if (!local_ptr) {
+        runtime_error("Local slot %d out of range for CONSTANT_LOCAL", slot);
+        return VMResult::RUNTIME_ERROR;
+    }
+    *local_ptr = vc;
+    SAFE_DISPATCH();
 }
 
 op_ADD_LOCAL_CONST: {
     COUNT_OPCODE(OP_ADD_LOCAL_CONST);
-    uint8_t idx_a = read_byte(ip);
+    uint8_t slot = read_byte(ip);
     Value vc = read_constant(chunk, ip);
-    if (local_frame_bases_.empty()) { runtime_error("No local frame for OP_ADD_LOCAL_CONST"); return VMResult::RUNTIME_ERROR; }
-    size_t base = local_frame_bases_.back();
-    size_t abs_a = base + static_cast<size_t>(idx_a);
-    if (abs_a >= param_stack_.size()) { runtime_error("Local index out of range for OP_ADD_LOCAL_CONST"); return VMResult::RUNTIME_ERROR; }
-    Value va = param_stack_[abs_a];
+    Value* local_ptr = get_local(slot);
+    if (!local_ptr) {
+        runtime_error("Local slot out of range for OP_ADD_LOCAL_CONST");
+        return VMResult::RUNTIME_ERROR;
+    }
+    Value va = *local_ptr;
     if (va.type() == ValueType::INT && vc.type() == ValueType::INT) {
         push(Value::integer(va.as_integer() + vc.as_integer()));
     } else if (va.type() == ValueType::FLOAT || vc.type() == ValueType::FLOAT) {
@@ -811,12 +793,13 @@ op_ADD_LOCAL_CONST: {
 op_ADD_CONST_LOCAL: {
     COUNT_OPCODE(OP_ADD_CONST_LOCAL);
     Value vc = read_constant(chunk, ip);
-    uint8_t idx_a = read_byte(ip);
-    if (local_frame_bases_.empty()) { runtime_error("No local frame for OP_ADD_CONST_LOCAL"); return VMResult::RUNTIME_ERROR; }
-    size_t base = local_frame_bases_.back();
-    size_t abs_a = base + static_cast<size_t>(idx_a);
-    if (abs_a >= param_stack_.size()) { runtime_error("Local index out of range for OP_ADD_CONST_LOCAL"); return VMResult::RUNTIME_ERROR; }
-    Value va = param_stack_[abs_a];
+    uint8_t slot = read_byte(ip);
+    Value* local_ptr = get_local(slot);
+    if (!local_ptr) {
+        runtime_error("Local slot out of range for OP_ADD_CONST_LOCAL");
+        return VMResult::RUNTIME_ERROR;
+    }
+    Value va = *local_ptr;
     if (va.type() == ValueType::INT && vc.type() == ValueType::INT) {
         push(Value::integer(vc.as_integer() + va.as_integer()));
     } else if (va.type() == ValueType::FLOAT || vc.type() == ValueType::FLOAT) {
@@ -840,12 +823,34 @@ op_ADD_CONST_LOCAL: {
 
 op_ADD_LOCAL_CONST_FLOAT: {
     COUNT_OPCODE(OP_ADD_LOCAL_CONST_FLOAT);
-    uint8_t idx_a = read_byte(ip); Value vc = read_constant(chunk, ip); if (local_frame_bases_.empty()) { runtime_error("No local frame for OP_ADD_LOCAL_CONST_FLOAT"); return VMResult::RUNTIME_ERROR; } size_t base = local_frame_bases_.back(); size_t abs_a = base + static_cast<size_t>(idx_a); if (abs_a >= param_stack_.size()) { runtime_error("Local index out of range for OP_ADD_LOCAL_CONST_FLOAT"); return VMResult::RUNTIME_ERROR; } Value va = param_stack_[abs_a]; double da = (va.type() == ValueType::FLOAT) ? va.as_floating() : static_cast<double>(va.as_integer()); double dc = (vc.type() == ValueType::FLOAT) ? vc.as_floating() : static_cast<double>(vc.as_integer()); push(Value::floating(da + dc)); SAFE_DISPATCH();
+    uint8_t slot = read_byte(ip);
+    Value vc = read_constant(chunk, ip);
+    Value* local_ptr = get_local(slot);
+    if (!local_ptr) {
+        runtime_error("Local slot out of range for OP_ADD_LOCAL_CONST_FLOAT");
+        return VMResult::RUNTIME_ERROR;
+    }
+    Value va = *local_ptr;
+    double da = (va.type() == ValueType::FLOAT) ? va.as_floating() : static_cast<double>(va.as_integer());
+    double dc = (vc.type() == ValueType::FLOAT) ? vc.as_floating() : static_cast<double>(vc.as_integer());
+    push(Value::floating(da + dc));
+    SAFE_DISPATCH();
 }
 
 op_ADD_CONST_LOCAL_FLOAT: {
     COUNT_OPCODE(OP_ADD_CONST_LOCAL_FLOAT);
-    Value vc = read_constant(chunk, ip); uint8_t idx_a = read_byte(ip); if (local_frame_bases_.empty()) { runtime_error("No local frame for OP_ADD_CONST_LOCAL_FLOAT"); return VMResult::RUNTIME_ERROR; } size_t base = local_frame_bases_.back(); size_t abs_a = base + static_cast<size_t>(idx_a); if (abs_a >= param_stack_.size()) { runtime_error("Local index out of range for OP_ADD_CONST_LOCAL_FLOAT"); return VMResult::RUNTIME_ERROR; } Value va = param_stack_[abs_a]; double da = (va.type() == ValueType::FLOAT) ? va.as_floating() : static_cast<double>(va.as_integer()); double dc = (vc.type() == ValueType::FLOAT) ? vc.as_floating() : static_cast<double>(vc.as_integer()); push(Value::floating(dc + da)); SAFE_DISPATCH();
+    Value vc = read_constant(chunk, ip);
+    uint8_t slot = read_byte(ip);
+    Value* local_ptr = get_local(slot);
+    if (!local_ptr) {
+        runtime_error("Local slot out of range for OP_ADD_CONST_LOCAL_FLOAT");
+        return VMResult::RUNTIME_ERROR;
+    }
+    Value va = *local_ptr;
+    double da = (va.type() == ValueType::FLOAT) ? va.as_floating() : static_cast<double>(va.as_integer());
+    double dc = (vc.type() == ValueType::FLOAT) ? vc.as_floating() : static_cast<double>(vc.as_integer());
+    push(Value::floating(dc + da));
+    SAFE_DISPATCH();
 }
     return VMResult::OK;
 }
@@ -859,40 +864,38 @@ Value VM::read_constant(const Chunk& chunk, const uint8_t*& ip) {
     return chunk.get_constant(index);
 }
 
-void VM::push_local_frame(const std::vector<std::string>& locals_combined, const std::vector<Value>& args) {
-    size_t base = param_stack_.size();
-    local_frame_bases_.push_back(base);
-
-    std::unordered_map<std::string, size_t> frame_map;
-    for (size_t i = 0; i < locals_combined.size(); ++i) {
-        Value v = (i < args.size()) ? args[i] : Value::nil();
-        param_stack_.push_back(v);
-        frame_map[locals_combined[i]] = base + i;
-    }
-    local_frames_.push_back(std::move(frame_map));
+void VM::push_call_frame(const Chunk* chunk, uint8_t arg_count) {
+    CallFrame frame;
+    frame.base = stack_top_ - arg_count;
+    frame.top = stack_top_;
+    frame.return_ip = nullptr;
+    frame.chunk = chunk;
+    
+    call_frames_.push_back(frame);
+    current_frame_ = &call_frames_.back();
+    
+    // Reserve space for local variables (parameters become locals 0, 1, 2, ...)
 }
 
-void VM::pop_local_frame() {
-    if (local_frame_bases_.empty()) return;
-    size_t base = local_frame_bases_.back();
-    local_frame_bases_.pop_back();
-
-    if (base <= param_stack_.size()) {
-        param_stack_.resize(base);
+void VM::pop_call_frame() {
+    if (!call_frames_.empty()) {
+        call_frames_.pop_back();
+        if (call_frames_.empty()) {
+            current_frame_ = nullptr;
+        } else {
+            current_frame_ = &call_frames_.back();
+        }
     }
-
-    if (!local_frames_.empty()) local_frames_.pop_back();
 }
 
-bool VM::local_lookup(const std::string& name, Value& out) const {
-    if (local_frames_.empty()) return false;
-    const auto& frame = local_frames_.back();
-    auto it = frame.find(name);
-    if (it == frame.end()) return false;
-    size_t idx = it->second;
-    if (idx >= param_stack_.size()) return false;
-    out = param_stack_[idx];
-    return true;
+Value* VM::get_local(uint8_t slot) {
+    if (!current_frame_) return nullptr;
+    Value* local_ptr = current_frame_->base + slot;
+    
+    if (local_ptr < stack_ || local_ptr >= stack_ + STACK_MAX) {
+        return nullptr;  // Out of VM stack bounds
+    }
+    return local_ptr;
 }
 
 bool VM::binary_op(OpCode op) {

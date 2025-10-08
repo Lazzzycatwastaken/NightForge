@@ -27,6 +27,14 @@ enum class VMResult {
     RUNTIME_ERROR
 };
 
+// stolen from lua 5.4 lol
+struct CallFrame {
+    Value* base;
+    Value* top;
+    const uint8_t* return_ip;
+    const Chunk* chunk;
+};
+
 class VM {
 public:
     VM(HostEnvironment* host_env = nullptr);
@@ -71,14 +79,13 @@ private:
 
 #endif
 
-    std::vector<Value> param_stack_;
-    std::vector<std::unordered_map<std::string, size_t>> local_frames_;
-    std::vector<size_t> local_frame_bases_; // base index per frame
+    std::vector<CallFrame> call_frames_;
+    CallFrame* current_frame_;
 
-    // Local frame helpers
-    void push_local_frame(const std::vector<std::string>& locals_combined, const std::vector<Value>& args);
-    void pop_local_frame();
-    bool local_lookup(const std::string& name, Value& out) const;
+    // Call frame helpers (unified stack)
+    void push_call_frame(const Chunk* chunk, uint8_t arg_count);
+    void pop_call_frame();
+    Value* get_local(uint8_t slot);  // Direct shot
     
 private:
     static constexpr size_t STACK_MAX = 16384; // those who know

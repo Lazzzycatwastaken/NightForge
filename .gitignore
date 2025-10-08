@@ -20,3 +20,17 @@ assets/scripts/test_nil_while.ns
 assets/scripts/test_simple_while.ns
 assets/scripts/test_while.ns
 vscode-extension/
+*.nsc
+float_test_big.ns
+float_test.ns
+func_test_big.ns
+func_test.ns
+host_test.ns
+int_test.ns
+perf_test_full.ns
+perf_test_partial.ns
+perf_test_with_functions.ns
+perf_test_with_host.ns
+simple_test.ns
+string_test.ns
+test_optimized_opcodes.ns
