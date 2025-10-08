@@ -60,23 +60,21 @@ jobs:
       uses: msys2/setup-msys2@v2
       with:
         msystem: MINGW64
-
-    - name: Install dependencies
-      shell: bash
-      run: |
-        pacman --noconfirm -Syuu
-        pacman --noconfirm -S --needed mingw-w64-x86_64-toolchain mingw-w64-x86_64-cmake mingw-w64-x86_64-imagemagick
-        echo "export PATH=/mingw64/bin:$PATH" >> $GITHUB_ENV
+        update: true
+        install: >-
+          mingw-w64-x86_64-toolchain
+          mingw-w64-x86_64-cmake
+          mingw-w64-x86_64-imagemagick
 
     - name: Build converter
-      shell: bash
+      shell: msys2 {0}
       run: |
         mkdir build && cd build
         cmake ..
         make -j$(nproc) webp_to_ascii
 
     - name: Test ASCII conversion
-      shell: bash
+      shell: msys2 {0}
       run: |
         cd build
         if [ ! -f webp_to_ascii ]; then echo "webp_to_ascii not found; skipping"; exit 0; fi

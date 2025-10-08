@@ -110,29 +110,27 @@ jobs:
       uses: msys2/setup-msys2@v2
       with:
         msystem: MINGW64
-
-    - name: Install dependencies
-      shell: bash
-      run: |
-        pacman --noconfirm -Syuu
-        pacman --noconfirm -S --needed mingw-w64-x86_64-toolchain mingw-w64-x86_64-cmake mingw-w64-x86_64-make
-        echo "export PATH=/mingw64/bin:$PATH" >> $GITHUB_ENV
+        update: true
+        install: >-
+          mingw-w64-x86_64-toolchain
+          mingw-w64-x86_64-cmake
+          mingw-w64-x86_64-make
 
     - name: Configure CMake
-      shell: bash
+      shell: msys2 {0}
       run: |
         mkdir build
         cd build
         cmake .. -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
 
     - name: Build
-      shell: bash
+      shell: msys2 {0}
       run: |
         cd build
         make -j$(nproc)
 
     - name: Test executables exist
-      shell: bash
+      shell: msys2 {0}
       run: |
         cd build
         test -f nightforge || (echo "nightforge not built" && exit 1)
@@ -140,7 +138,7 @@ jobs:
         echo "✓ Both executables built successfully on Windows (MINGW)"
 
     - name: Test help commands (smoke)
-      shell: bash
+      shell: msys2 {0}
       run: |
         cd build
         ./nightforge --help || true
@@ -148,7 +146,7 @@ jobs:
         echo "✓ Help commands work (MINGW)"
 
     - name: Test basic functionality
-      shell: bash
+      shell: msys2 {0}
       run: |
         cd build
         timeout 5s ./nightforge --min-width 10 --min-height 5 || true
