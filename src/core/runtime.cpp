@@ -6,11 +6,19 @@
 
 namespace nightforge {
 
-Runtime::Runtime() : host_env_(nullptr), has_error_(false), external_vm_(nullptr) {
-    vm_ = std::make_unique<nightscript::VM>();
+#ifdef _WIN32
+Runtime::Runtime()
+    : vm_(std::make_unique<nightscript::VM>()),
+      external_vm_(nullptr),
+      host_env_(nullptr),
+      has_error_(false) {
 }
 
-Runtime::Runtime(nightscript::VM* vm) : host_env_(nullptr), has_error_(false), external_vm_(vm) {
+Runtime::Runtime(nightscript::VM* vm)
+    : vm_(nullptr),
+      external_vm_(vm),
+      host_env_(nullptr),
+      has_error_(false) {
     // Don't create internal VM when using external one
 }
 
