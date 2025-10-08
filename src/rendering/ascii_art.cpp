@@ -8,7 +8,7 @@
 #include <cstring>
 
 // Compatibility for older C++ standards
-#if __cplusplus < 201703L
+#if __cplusplus < 201703L && !defined(__cpp_lib_clamp)
 namespace std {
     template<class T>
     constexpr const T& clamp(const T& v, const T& lo, const T& hi) {

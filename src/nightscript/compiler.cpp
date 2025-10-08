@@ -49,14 +49,14 @@ void Compiler::lower_stack_to_registers() {
     const auto& src = chunk_->code();
     std::vector<uint8_t> out;
     size_t i = 0;
-    uint8_t next_reg = 0;
+    // uint8_t next_reg = 0; // unused
     
     size_t local_local_opts = 0;
     size_t local_const_opts = 0;
     size_t const_local_opts = 0;
     
     while (i < src.size()) {
-        uint8_t op = src[i];
+        // uint8_t op = src[i]; // unused
         if (i + 4 < src.size()) {
             if (src[i] == static_cast<uint8_t>(OpCode::OP_GET_LOCAL) && src[i+2] == static_cast<uint8_t>(OpCode::OP_GET_LOCAL)) {
                 uint8_t idx_a = src[i+1];
@@ -711,6 +711,8 @@ void Compiler::table_declaration() {
     
     consume(TokenType::RIGHT_BRACE, "Expected '}' after table elements");
     
+    (void)element_count;
+    
     emit_byte(static_cast<uint8_t>(OpCode::OP_CONSTANT));
     emit_byte(static_cast<uint8_t>(constant_index));
     
@@ -765,6 +767,9 @@ void Compiler::print_statement() {
     } while (check(TokenType::STRING) || check(TokenType::NUMBER) || 
              check(TokenType::BOOLEAN) || check(TokenType::NIL) || 
              check(TokenType::LEFT_PAREN) || check(TokenType::IDENTIFIER));
+    
+    // Suppress unused variable warning for expression_count
+    (void)expression_count;
 }
 
 void Compiler::return_statement() {

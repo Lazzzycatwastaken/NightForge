@@ -43,13 +43,14 @@ jobs:
           mingw-w64-x86_64-toolchain
           mingw-w64-x86_64-cmake
           mingw-w64-x86_64-make
+          make
 
     - name: Configure & Build
       shell: msys2 {0}
       run: |
         mkdir build && cd build
-        cmake ..
-        make -j$(nproc)
+        cmake .. -G "Unix Makefiles"
+        cmake --build . --parallel $(nproc)
 
     - name: Test
       shell: msys2 {0}

@@ -114,6 +114,9 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
     const uint8_t* ip = chunk.code().data();
     const uint8_t* end = ip + chunk.code().size();
     
+    std::string func_name_lc;
+    std::string func_name_lc2; // For tail call
+    
 #ifdef DEBUG_TRACE_EXECUTION
     std::cout << "== execution begin ==" << std::endl;
 #endif
@@ -522,7 +525,6 @@ op_CALL_HOST: {
         SAFE_DISPATCH();
     }
 
-    std::string func_name_lc;
     ssize_t func_index = chunk.get_function_index(func_name_lc);
     {
         std::string fn = strings_.get_string(fname_sid);
@@ -618,15 +620,14 @@ op_TAIL_CALL: {
         }
     }
 
-    std::string func_name_lc;
     {
         std::string fn = strings_.get_string(fname_sid);
-        func_name_lc = fn;
-        std::transform(func_name_lc.begin(), func_name_lc.end(), func_name_lc.begin(),
+        func_name_lc2 = fn;
+        std::transform(func_name_lc2.begin(), func_name_lc2.end(), func_name_lc2.begin(),
                        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     }
 
-    ssize_t func_index = chunk.get_function_index(func_name_lc);
+    ssize_t func_index = chunk.get_function_index(func_name_lc2);
     if (func_index >= 0) {
         const Chunk& fchunk = chunk.get_function(static_cast<size_t>(func_index));
 
@@ -658,7 +659,7 @@ op_TAIL_CALL: {
 
     std::optional<Value> host_result;
     if (host_env_) {
-        host_result = host_env_->call_host(func_name_lc, tmp_args_);
+        host_result = host_env_->call_host(func_name_lc2, tmp_args_);
     }
     if (host_result.has_value()) {
         push(*host_result);

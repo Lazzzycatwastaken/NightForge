@@ -115,19 +115,20 @@ jobs:
           mingw-w64-x86_64-toolchain
           mingw-w64-x86_64-cmake
           mingw-w64-x86_64-make
+          make
 
     - name: Configure CMake
       shell: msys2 {0}
       run: |
         mkdir build
         cd build
-        cmake .. -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+        cmake .. -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -G "Unix Makefiles"
 
     - name: Build
       shell: msys2 {0}
       run: |
         cd build
-        make -j$(nproc)
+        cmake --build . --parallel $(nproc)
 
     - name: Test executables exist
       shell: msys2 {0}

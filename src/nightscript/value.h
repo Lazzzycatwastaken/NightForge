@@ -5,6 +5,13 @@
 #include <string>
 #include <unordered_map>
 
+#ifdef _WIN32
+    #include <BaseTsd.h>
+    typedef SSIZE_T ssize_t;
+#elif !defined(ssize_t) && !defined(_SSIZE_T_DEFINED)
+    #include <sys/types.h>
+#endif
+
 namespace nightforge {
 namespace nightscript {
 

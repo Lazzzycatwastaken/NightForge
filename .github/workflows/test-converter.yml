@@ -65,13 +65,14 @@ jobs:
           mingw-w64-x86_64-toolchain
           mingw-w64-x86_64-cmake
           mingw-w64-x86_64-imagemagick
+          make
 
     - name: Build converter
       shell: msys2 {0}
       run: |
         mkdir build && cd build
-        cmake ..
-        make -j$(nproc) webp_to_ascii
+        cmake .. -G "Unix Makefiles"
+        cmake --build . --parallel $(nproc) --target webp_to_ascii
 
     - name: Test ASCII conversion
       shell: msys2 {0}
