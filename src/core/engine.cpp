@@ -664,12 +664,24 @@ void Engine::setup_host_functions() {
     // add(array, value) -> array
     host_env_impl_->register_function("add", [this](const std::vector<Value>& args) -> nightscript::Value {
         using namespace nightscript;
-        if (args.size() != 2 || args[0].type() != ValueType::ARRAY) {
+        if (args.size() != 2) {
             std::cerr << "add: expected (array, value)" << std::endl;
             return Value::nil();
         }
-        vm_->arrays().push_back(args[0].as_array_id(), args[1]);
-        return args[0];
+        Value arrayArg;
+        Value valueArg;
+        if (args[0].type() == ValueType::ARRAY) {
+            arrayArg = args[0];
+            valueArg = args[1];
+        } else if (args[1].type() == ValueType::ARRAY) {
+            arrayArg = args[1];
+            valueArg = args[0];
+        } else {
+            std::cerr << "add: expected (array, value)" << std::endl;
+            return Value::nil();
+        }
+        vm_->arrays().push_back(arrayArg.as_array_id(), valueArg);
+        return arrayArg;
     });
 
     // remove(array, index) -> removed value or nil

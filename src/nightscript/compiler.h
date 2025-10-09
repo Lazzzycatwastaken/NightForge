@@ -69,6 +69,8 @@ private:
     void unary();
     void array_literal();
     void postfix_access();
+    bool try_length_of_expression();
+    bool try_sugar_statement();
     // NOTE: full operator precedence parsing handled by expression_precedence().
     // The old `binary()` placeholder was removed (dead code)
     void statement();

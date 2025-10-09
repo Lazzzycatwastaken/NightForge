@@ -171,6 +171,9 @@ void Compiler::expression() {
 }
 
 void Compiler::expression_precedence(int min_precedence) {
+    if (try_length_of_expression()) {
+        last_expression_type_ = InferredType::INTEGER;
+    } else {
     // Parse primary expression (numbers, strings, parentheses, identifiers, etc)
     if (match(TokenType::NUMBER)) {
         number();
@@ -216,6 +219,7 @@ void Compiler::expression_precedence(int min_precedence) {
     } else {
         error("Expected expression");
         return;
+    }
     }
     
     // Handle binary operators with precedence
@@ -349,6 +353,10 @@ void Compiler::statement() {
     if (match(TokenType::NEWLINE)) {
         return;
     }
+
+    if (try_sugar_statement()) {
+        return;
+    }
     
     // Check for print statement
     if (check(TokenType::IDENTIFIER) && current_token().lexeme == "print") {
@@ -463,6 +471,142 @@ void Compiler::statement() {
     } else {
         expression_statement();
     }
+}
+
+bool Compiler::try_length_of_expression() {
+    if (!(check(TokenType::IDENTIFIER) && current_token().lexeme == "length")) return false;
+    if (current_ + 1 >= tokens_.size()) return false;
+    const Token &next = tokens_[current_ + 1];
+    if (!(next.type == TokenType::IDENTIFIER && next.lexeme == "of")) return false;
+
+    advance();
+    advance();
+
+    if (match(TokenType::LEFT_PAREN)) {
+        grouping();
+    } else if (match(TokenType::IDENTIFIER)) {
+        identifier();
+        while (match(TokenType::LEFT_BRACKET)) {
+            expression();
+            consume(TokenType::RIGHT_BRACKET, "Expected ']' after index");
+            emit_byte(static_cast<uint8_t>(OpCode::OP_ARRAY_GET));
+        }
+    } else if (match(TokenType::STRING) || match(TokenType::NUMBER) || match(TokenType::BOOLEAN) || match(TokenType::NIL)) {
+        current_--;
+        if (match(TokenType::STRING)) string();
+        else if (match(TokenType::NUMBER)) number();
+        else if (match(TokenType::BOOLEAN) || match(TokenType::NIL)) literal();
+    } else {
+        error("Expected a value after 'length of'");
+        return true; 
+    }
+
+    uint32_t name_id = strings_->intern("length");
+    size_t name_const = chunk_->add_constant(Value::string_id(name_id));
+    emit_byte(static_cast<uint8_t>(OpCode::OP_CALL_HOST));
+    emit_byte(static_cast<uint8_t>(name_const));
+    emit_byte(static_cast<uint8_t>(1));
+
+    return true;
+}
+
+bool Compiler::try_sugar_statement() {
+    if (!check(TokenType::IDENTIFIER)) return false;
+    std::string kw = current_token().lexeme;
+    if (kw == "add") {
+        advance();
+
+        expression();
+
+        if (!(check(TokenType::IDENTIFIER) && current_token().lexeme == "to")) {
+            error("Expected 'to' after value in 'add' statement");
+            return true; // handled
+        }
+        advance();
+
+        if (match(TokenType::LEFT_PAREN)) {
+            grouping();
+        } else if (match(TokenType::IDENTIFIER)) {
+            identifier();
+            while (match(TokenType::LEFT_BRACKET)) {
+                expression();
+                consume(TokenType::RIGHT_BRACKET, "Expected ']' after index");
+                emit_byte(static_cast<uint8_t>(OpCode::OP_ARRAY_GET));
+            }
+        } else {
+            error("Expected a list after 'to' in 'add' statement");
+            return true;
+        }
+
+        uint32_t name_id = strings_->intern("add");
+        size_t name_const = chunk_->add_constant(Value::string_id(name_id));
+        emit_byte(static_cast<uint8_t>(OpCode::OP_CALL_HOST));
+        emit_byte(static_cast<uint8_t>(name_const));
+        emit_byte(static_cast<uint8_t>(2));
+        emit_byte(static_cast<uint8_t>(OpCode::OP_POP));
+        return true;
+    }
+    if (kw == "remove") {
+        advance(); // consume 'remove'
+        if (!check(TokenType::IDENTIFIER)) { error("Expected list name after 'remove'"); return true; }
+        Token nameTok = current_token(); advance();
+
+        std::vector<std::string> combined_locals;
+        combined_locals.reserve(current_local_params_.size() + current_local_locals_.size());
+        for (const auto &p : current_local_params_) combined_locals.push_back(p);
+        for (const auto &l : current_local_locals_) combined_locals.push_back(l);
+        auto it = std::find(combined_locals.begin(), combined_locals.end(), nameTok.lexeme);
+        if (it != combined_locals.end()) {
+            size_t idx = static_cast<size_t>(std::distance(combined_locals.begin(), it));
+            emit_byte(static_cast<uint8_t>(OpCode::OP_GET_LOCAL));
+            emit_byte(static_cast<uint8_t>(idx));
+        } else {
+            uint32_t name_id = strings_->intern(nameTok.lexeme);
+            size_t name_constant = chunk_->add_constant(Value::string_id(name_id));
+            emit_bytes(static_cast<uint8_t>(OpCode::OP_GET_GLOBAL), static_cast<uint8_t>(name_constant));
+        }
+
+        consume(TokenType::LEFT_BRACKET, "Expected '[' after list name");
+        expression();
+        consume(TokenType::RIGHT_BRACKET, "Expected ']' after index");
+
+        uint32_t name_id2 = strings_->intern("remove");
+        size_t name_const2 = chunk_->add_constant(Value::string_id(name_id2));
+        emit_byte(static_cast<uint8_t>(OpCode::OP_CALL_HOST));
+        emit_byte(static_cast<uint8_t>(name_const2));
+        emit_byte(static_cast<uint8_t>(2));
+        emit_byte(static_cast<uint8_t>(OpCode::OP_POP));
+        return true;
+    }
+    if (kw == "clear") {
+        advance();
+        if (!check(TokenType::IDENTIFIER)) { error("Expected list name after 'clear'"); return true; }
+        Token nameTok = current_token(); advance();
+
+        std::vector<std::string> combined_locals;
+        combined_locals.reserve(current_local_params_.size() + current_local_locals_.size());
+        for (const auto &p : current_local_params_) combined_locals.push_back(p);
+        for (const auto &l : current_local_locals_) combined_locals.push_back(l);
+        auto it = std::find(combined_locals.begin(), combined_locals.end(), nameTok.lexeme);
+        if (it != combined_locals.end()) {
+            size_t idx = static_cast<size_t>(std::distance(combined_locals.begin(), it));
+            emit_byte(static_cast<uint8_t>(OpCode::OP_GET_LOCAL));
+            emit_byte(static_cast<uint8_t>(idx));
+        } else {
+            uint32_t name_id = strings_->intern(nameTok.lexeme);
+            size_t name_constant = chunk_->add_constant(Value::string_id(name_id));
+            emit_bytes(static_cast<uint8_t>(OpCode::OP_GET_GLOBAL), static_cast<uint8_t>(name_constant));
+        }
+
+        uint32_t name_id3 = strings_->intern("clear");
+        size_t name_const3 = chunk_->add_constant(Value::string_id(name_id3));
+        emit_byte(static_cast<uint8_t>(OpCode::OP_CALL_HOST));
+        emit_byte(static_cast<uint8_t>(name_const3));
+        emit_byte(static_cast<uint8_t>(1));
+        emit_byte(static_cast<uint8_t>(OpCode::OP_POP));
+        return true;
+    }
+    return false;
 }
 
 void Compiler::expression_statement() {

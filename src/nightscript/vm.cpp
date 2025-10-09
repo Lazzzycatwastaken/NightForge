@@ -711,8 +711,33 @@ op_POP: {
 op_PRINT: {
     COUNT_OPCODE(OP_PRINT);
     Value value = pop();
-    if (value.type() == ValueType::STRING_BUFFER) std::cout << buffers_.get_buffer(value.as_buffer_id());
-    else {
+    if (value.type() == ValueType::STRING_BUFFER) {
+        std::cout << buffers_.get_buffer(value.as_buffer_id());
+    } else if (value.type() == ValueType::ARRAY) {
+        uint32_t id = value.as_array_id();
+        size_t len = arrays_.length(id);
+        for (size_t i = 0; i < len; ++i) {
+            Value elem = arrays_.get(id, static_cast<ssize_t>(i));
+            if (elem.type() == ValueType::STRING_BUFFER) {
+                std::cout << buffers_.get_buffer(elem.as_buffer_id());
+            } else if (elem.type() == ValueType::STRING_ID) {
+                std::cout << strings_.get_string(elem.as_string_id());
+            } else if (elem.type() == ValueType::NIL) {
+                std::cout << "nil";
+            } else if (elem.type() == ValueType::BOOL) {
+                std::cout << (elem.as_boolean() ? "true" : "false");
+            } else if (elem.type() == ValueType::INT) {
+                std::cout << elem.as_integer();
+            } else if (elem.type() == ValueType::FLOAT) {
+                std::cout << elem.as_floating();
+            } else if (elem.type() == ValueType::ARRAY) {
+                std::cout << "[... ]"; // avoid deep recursion
+            } else {
+                std::cout << "unknown";
+            }
+            if (i + 1 < len) std::cout << ' ';
+        }
+    } else {
         switch (value.type()) { case ValueType::NIL: std::cout << "nil"; break; case ValueType::BOOL: std::cout << (value.as_boolean() ? "true" : "false"); break; case ValueType::INT: std::cout << value.as_integer(); break; case ValueType::FLOAT: std::cout << value.as_floating(); break; case ValueType::STRING_ID: std::cout << strings_.get_string(value.as_string_id()); break; default: std::cout << "unknown"; break; }
     }
     std::cout << std::endl; SAFE_DISPATCH();
@@ -721,8 +746,33 @@ op_PRINT: {
 op_PRINT_SPACE: {
     COUNT_OPCODE(OP_PRINT_SPACE);
     Value value = pop();
-    if (value.type() == ValueType::STRING_BUFFER) std::cout << buffers_.get_buffer(value.as_buffer_id());
-    else {
+    if (value.type() == ValueType::STRING_BUFFER) {
+        std::cout << buffers_.get_buffer(value.as_buffer_id());
+    } else if (value.type() == ValueType::ARRAY) {
+        uint32_t id = value.as_array_id();
+        size_t len = arrays_.length(id);
+        for (size_t i = 0; i < len; ++i) {
+            Value elem = arrays_.get(id, static_cast<ssize_t>(i));
+            if (elem.type() == ValueType::STRING_BUFFER) {
+                std::cout << buffers_.get_buffer(elem.as_buffer_id());
+            } else if (elem.type() == ValueType::STRING_ID) {
+                std::cout << strings_.get_string(elem.as_string_id());
+            } else if (elem.type() == ValueType::NIL) {
+                std::cout << "nil";
+            } else if (elem.type() == ValueType::BOOL) {
+                std::cout << (elem.as_boolean() ? "true" : "false");
+            } else if (elem.type() == ValueType::INT) {
+                std::cout << elem.as_integer();
+            } else if (elem.type() == ValueType::FLOAT) {
+                std::cout << elem.as_floating();
+            } else if (elem.type() == ValueType::ARRAY) {
+                std::cout << "[... ]";
+            } else {
+                std::cout << "unknown";
+            }
+            if (i + 1 < len) std::cout << ' ';
+        }
+    } else {
         switch (value.type()) { case ValueType::NIL: std::cout << "nil"; break; case ValueType::BOOL: std::cout << (value.as_boolean() ? "true" : "false"); break; case ValueType::INT: std::cout << value.as_integer(); break; case ValueType::FLOAT: std::cout << value.as_floating(); break; case ValueType::STRING_ID: std::cout << strings_.get_string(value.as_string_id()); break; default: std::cout << "unknown"; break; }
     }
     std::cout << " "; SAFE_DISPATCH();
