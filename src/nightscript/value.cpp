@@ -1,5 +1,6 @@
 #include "value.h"
 #include <iostream>
+#include <limits>
 
 namespace nightforge {
 namespace nightscript {
@@ -259,6 +260,105 @@ size_t BufferTable::memory_usage() const {
     for (const auto &b : buffers_) total += b.str.capacity();
     return total;
 }
+
+// ArrayTable implementation
+uint32_t ArrayTable::create(size_t reserve) {
+    uint32_t id;
+    if (!free_slots_.empty()) {
+        id = free_slots_.back();
+        free_slots_.pop_back();
+        arrays_[id] = ArrayEntry{};
+        if (reserve) arrays_[id].items.reserve(reserve);
+    } else {
+        id = static_cast<uint32_t>(arrays_.size());
+        arrays_.push_back(ArrayEntry{});
+        if (reserve) arrays_.back().items.reserve(reserve);
+    }
+    return id;
+}
+
+size_t ArrayTable::length(uint32_t id) const {
+    if (id >= arrays_.size()) return 0;
+    return arrays_[id].items.size();
+}
+
+void ArrayTable::push_back(uint32_t id, const Value& v) {
+    if (id >= arrays_.size()) return;
+    arrays_[id].items.push_back(v);
+}
+
+Value ArrayTable::pop_back(uint32_t id) {
+    if (id >= arrays_.size()) return Value::nil();
+    auto &vec = arrays_[id].items;
+    if (vec.empty()) return Value::nil();
+    Value v = vec.back();
+    vec.pop_back();
+    return v;
+}
+
+static inline bool normalize_index(ssize_t& idx, size_t size) {
+    if (idx < 0) {
+        // Negative index from end (Python)
+        ssize_t from_end = static_cast<ssize_t>(size) + idx; // idx is negative
+        if (from_end < 0) return false;
+        idx = from_end;
+    }
+    return static_cast<size_t>(idx) < size;
+}
+
+Value ArrayTable::get(uint32_t id, ssize_t index) const {
+    if (id >= arrays_.size()) return Value::nil();
+    const auto &vec = arrays_[id].items;
+    if (!normalize_index(index, vec.size())) return Value::nil();
+    return vec[static_cast<size_t>(index)];
+}
+
+void ArrayTable::set(uint32_t id, ssize_t index, const Value& v) {
+    if (id >= arrays_.size()) return;
+    auto &vec = arrays_[id].items;
+    ssize_t idx = index;
+    if (idx < 0) {
+        if (!normalize_index(idx, vec.size())) return;
+    }
+    size_t uidx = static_cast<size_t>(idx);
+    if (uidx == vec.size()) {
+        vec.push_back(v);
+        return;
+    }
+    if (uidx < vec.size()) {
+        vec[uidx] = v;
+    }
+}
+
+Value ArrayTable::remove_at(uint32_t id, ssize_t index) {
+    if (id >= arrays_.size()) return Value::nil();
+    auto &vec = arrays_[id].items;
+    if (!normalize_index(index, vec.size())) return Value::nil();
+    size_t uidx = static_cast<size_t>(index);
+    Value v = vec[uidx];
+    vec.erase(vec.begin() + static_cast<ssize_t>(uidx));
+    return v;
+}
+
+void ArrayTable::clear(uint32_t id) {
+    if (id >= arrays_.size()) return;
+    arrays_[id].items.clear();
+}
+
+void ArrayTable::mark_array_reachable(uint32_t id) {
+    if (id < arrays_.size()) arrays_[id].gc_marked = true;
+}
+
+void ArrayTable::clear_gc_marks() {
+    for (auto &a : arrays_) a.gc_marked = false;
+}
+
+void ArrayTable::for_each(uint32_t id, const std::function<void(const Value&)>& fn) const {
+    if (id >= arrays_.size()) return;
+    const auto &vec = arrays_[id].items;
+    for (const auto &val : vec) fn(val);
+}
+
 
 } // namespace nightscript
 } // namespace nightforge

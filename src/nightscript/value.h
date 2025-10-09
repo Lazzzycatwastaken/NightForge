@@ -4,6 +4,7 @@
 #include <vector>
 #include <string>
 #include <unordered_map>
+#include <functional>
 
 #ifdef _WIN32
     #include <BaseTsd.h>
@@ -78,6 +79,13 @@ enum class OpCode : uint8_t {
     OP_ADD_CONST_LOCAL,
     OP_ADD_LOCAL_CONST_FLOAT,
     OP_ADD_CONST_LOCAL_FLOAT,
+
+    OP_ARRAY_CREATE,
+    OP_ARRAY_GET,
+    OP_ARRAY_SET,
+    OP_ARRAY_LENGTH,
+    OP_ARRAY_PUSH,
+    OP_ARRAY_POP,
 };
 
 // Value types (classification)
@@ -89,6 +97,7 @@ enum class ValueType : uint8_t {
     STRING_BUFFER, // mutable string builder buffer
     STRING_ID,  // interned string ID
     TABLE_ID,   // table reference
+    ARRAY,      // array reference
 };
 
 // NaN-boxed 64-bit value
@@ -125,6 +134,7 @@ private:
     static constexpr uint64_t TAG_FAMILY_STRING = (0x2ULL << TAG_SHIFT);
     static constexpr uint64_t TAG_FAMILY_TABLE  = (0x3ULL << TAG_SHIFT);
     static constexpr uint64_t TAG_FAMILY_BUFFER = (0x4ULL << TAG_SHIFT);
+    static constexpr uint64_t TAG_FAMILY_ARRAY  = (0x5ULL << TAG_SHIFT);
 
     static constexpr uint64_t MAKE_FAMILY(uint64_t family) { return QNAN | family; }
 
@@ -157,6 +167,9 @@ public:
     static Value table_id(uint32_t id) {
         Value v; v.bits_ = MAKE_FAMILY(TAG_FAMILY_TABLE) | static_cast<uint64_t>(id); return v;
     }
+    static Value array_id(uint32_t id) {
+        Value v; v.bits_ = MAKE_FAMILY(TAG_FAMILY_ARRAY) | static_cast<uint64_t>(id); return v;
+    }
 
     // Classification
     ValueType type() const {
@@ -165,9 +178,10 @@ public:
         if (bits_ == TAG_TRUE || bits_ == TAG_FALSE) return ValueType::BOOL;
         uint64_t tag = bits_ & TAG_MASK;
         if (tag == TAG_FAMILY_INT) return ValueType::INT;
-    if (tag == TAG_FAMILY_BUFFER) return ValueType::STRING_BUFFER;
+        if (tag == TAG_FAMILY_BUFFER) return ValueType::STRING_BUFFER;
         if (tag == TAG_FAMILY_STRING) return ValueType::STRING_ID;
         if (tag == TAG_FAMILY_TABLE) return ValueType::TABLE_ID;
+        if (tag == TAG_FAMILY_ARRAY) return ValueType::ARRAY;
         // Fallback treat as float (covers numeric qNaN payloads)
         return ValueType::FLOAT;
     }
@@ -182,6 +196,7 @@ public:
     bool is_string_id() const { return is_qnan(bits_) && ((bits_ & TAG_MASK) == TAG_FAMILY_STRING); }
     bool is_buffer_id() const { return is_qnan(bits_) && ((bits_ & TAG_MASK) == TAG_FAMILY_BUFFER); }
     bool is_table_id() const { return is_qnan(bits_) && ((bits_ & TAG_MASK) == TAG_FAMILY_TABLE); }
+    bool is_array_id() const { return is_qnan(bits_) && ((bits_ & TAG_MASK) == TAG_FAMILY_ARRAY); }
 
     // Accessors (caller must ensure the type matches)
     bool as_boolean() const { return bits_ == TAG_TRUE; }
@@ -199,6 +214,7 @@ public:
     uint32_t as_string_id() const { return static_cast<uint32_t>(bits_ & 0xFFFFFFFFULL); }
     uint32_t as_buffer_id() const { return static_cast<uint32_t>(bits_ & 0xFFFFFFFFULL); }
     uint32_t as_table_id() const { return static_cast<uint32_t>(bits_ & 0xFFFFFFFFULL); }
+    uint32_t as_array_id() const { return static_cast<uint32_t>(bits_ & 0xFFFFFFFFULL); }
 };
 
 // Bytecode chunk (contains instructions + constants)
@@ -301,6 +317,33 @@ private:
     };
 
     std::vector<BufferEntry> buffers_;
+    std::vector<uint32_t> free_slots_;
+};
+
+class ArrayTable {
+public:
+    uint32_t create(size_t reserve = 0);
+    size_t length(uint32_t id) const;
+    void push_back(uint32_t id, const Value& v);
+    Value pop_back(uint32_t id);
+    Value get(uint32_t id, ssize_t index) const;
+    void set(uint32_t id, ssize_t index, const Value& v);
+    Value remove_at(uint32_t id, ssize_t index);
+    void clear(uint32_t id);
+
+    // GC support
+    void mark_array_reachable(uint32_t id);
+    void clear_gc_marks();
+    // Traverse to mark contained references (strings/buffers/arrays)
+    void for_each(uint32_t id, const std::function<void(const Value&)>& fn) const;
+
+private:
+    struct ArrayEntry {
+        std::vector<Value> items;
+        bool gc_marked = false;
+    };
+
+    std::vector<ArrayEntry> arrays_;
     std::vector<uint32_t> free_slots_;
 };
 

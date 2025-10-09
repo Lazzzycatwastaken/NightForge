@@ -182,8 +182,37 @@ void Compiler::expression_precedence(int min_precedence) {
         grouping();
     } else if (match(TokenType::NOT)) {
         unary();
+    } else if (match(TokenType::MINUS)) {
+        size_t zero_idx = chunk_->add_constant(Value::integer(0));
+        emit_bytes(static_cast<uint8_t>(OpCode::OP_CONSTANT), static_cast<uint8_t>(zero_idx));
+        expression_precedence(3);
+        emit_byte(static_cast<uint8_t>(OpCode::OP_SUBTRACT));
+        last_expression_type_ = InferredType::INTEGER; // best effort
     } else if (match(TokenType::IDENTIFIER)) {
         identifier();
+        while (match(TokenType::LEFT_BRACKET)) {
+            expression();
+            consume(TokenType::RIGHT_BRACKET, "Expected ']' after index");
+            emit_byte(static_cast<uint8_t>(OpCode::OP_ARRAY_GET));
+            last_expression_type_ = InferredType::UNKNOWN;
+        }
+    } else if (match(TokenType::LEFT_BRACE)) {
+        // Array: { a, b, c }
+        // Parse elements
+        int count = 0;
+        if (!check(TokenType::RIGHT_BRACE)) {
+            expression();
+            count++;
+            while (match(TokenType::COMMA)) {
+                if (check(TokenType::RIGHT_BRACE)) break;
+                expression();
+                count++;
+            }
+        }
+        consume(TokenType::RIGHT_BRACE, "Expected '}' to close array literal");
+        emit_byte(static_cast<uint8_t>(OpCode::OP_ARRAY_CREATE));
+        emit_byte(static_cast<uint8_t>(count));
+        last_expression_type_ = InferredType::UNKNOWN;
     } else {
         error("Expected expression");
         return;
@@ -369,6 +398,32 @@ void Compiler::statement() {
             advance(); // consume identifier
             current_ = saved_current;
             assignment_statement();
+        } else if (next.type == TokenType::LEFT_BRACKET) {
+            advance();
+            Token nameTok = previous_token();
+            std::vector<std::string> combined_locals;
+            combined_locals.reserve(current_local_params_.size() + current_local_locals_.size());
+            for (const auto &p : current_local_params_) combined_locals.push_back(p);
+            for (const auto &l : current_local_locals_) combined_locals.push_back(l);
+            auto it = std::find(combined_locals.begin(), combined_locals.end(), nameTok.lexeme);
+            if (it != combined_locals.end()) {
+                size_t idx = static_cast<size_t>(std::distance(combined_locals.begin(), it));
+                emit_byte(static_cast<uint8_t>(OpCode::OP_GET_LOCAL));
+                emit_byte(static_cast<uint8_t>(idx));
+            } else {
+                uint32_t name_id = strings_->intern(nameTok.lexeme);
+                size_t name_constant = chunk_->add_constant(Value::string_id(name_id));
+                emit_bytes(static_cast<uint8_t>(OpCode::OP_GET_GLOBAL), static_cast<uint8_t>(name_constant));
+            }
+
+            consume(TokenType::LEFT_BRACKET, "Expected '[' after variable name");
+            expression();
+            consume(TokenType::RIGHT_BRACKET, "Expected ']' after index");
+            consume(TokenType::ASSIGN, "Expected '=' after index expression");
+            expression(); // RHS
+            emit_byte(static_cast<uint8_t>(OpCode::OP_ARRAY_SET));
+            emit_byte(static_cast<uint8_t>(OpCode::OP_POP));
+            return;
         } else if (next.type == TokenType::LEFT_PAREN) {
             // function call with parentheses
             current_ = saved_current;

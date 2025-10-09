@@ -67,6 +67,8 @@ private:
     void identifier();
     void grouping();
     void unary();
+    void array_literal();
+    void postfix_access();
     // NOTE: full operator precedence parsing handled by expression_precedence().
     // The old `binary()` placeholder was removed (dead code)
     void statement();

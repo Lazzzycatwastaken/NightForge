@@ -134,6 +134,8 @@ Token Lexer::next_token() {
         case ')': return make_token(TokenType::RIGHT_PAREN);
         case ',': return make_token(TokenType::COMMA);
         case '.': return make_token(TokenType::DOT);
+        case '[': return make_token(TokenType::LEFT_BRACKET);
+        case ']': return make_token(TokenType::RIGHT_BRACKET);
         default:
             // Unknown character
             return Token(TokenType::UNKNOWN, std::string(1, c), line_, column_ - 1);

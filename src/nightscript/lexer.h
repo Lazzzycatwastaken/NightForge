@@ -60,6 +60,8 @@ enum class TokenType {
     RIGHT_PAREN,  // )
     COMMA,        // ,
     DOT,          // .
+    LEFT_BRACKET, // [
+    RIGHT_BRACKET,// ]
     
     // Special
     NEWLINE,

@@ -631,10 +631,70 @@ void Engine::setup_host_functions() {
             case ValueType::STRING_ID: s = "string"; break;
             case ValueType::STRING_BUFFER: s = "buffer"; break;
             case ValueType::TABLE_ID: s = "table"; break;
+            case ValueType::ARRAY: s = "array"; break;
             default: s = "unknown"; break;
         }
         uint32_t id = vm_->strings().intern(s);
         return Value::string_id(id);
+    });
+
+    // length(value) - supports array, string, buffer
+    host_env_impl_->register_function("length", [this](const std::vector<Value>& args) -> nightscript::Value {
+        using namespace nightscript;
+        if (args.size() != 1) {
+            std::cerr << "length: expected 1 argument" << std::endl;
+            return Value::nil();
+        }
+        const Value &v = args[0];
+        if (v.type() == ValueType::ARRAY) {
+            size_t len = vm_->arrays().length(v.as_array_id());
+            return Value::integer(static_cast<int64_t>(len));
+        } else if (v.type() == ValueType::STRING_ID) {
+            const std::string &s = vm_->strings().get_string(v.as_string_id());
+            return Value::integer(static_cast<int64_t>(s.size()));
+        } else if (v.type() == ValueType::STRING_BUFFER) {
+            const std::string &s = vm_->buffers().get_buffer(v.as_buffer_id());
+            return Value::integer(static_cast<int64_t>(s.size()));
+        } else {
+            std::cerr << "length: unsupported type" << std::endl;
+            return Value::nil();
+        }
+    });
+
+    // add(array, value) -> array
+    host_env_impl_->register_function("add", [this](const std::vector<Value>& args) -> nightscript::Value {
+        using namespace nightscript;
+        if (args.size() != 2 || args[0].type() != ValueType::ARRAY) {
+            std::cerr << "add: expected (array, value)" << std::endl;
+            return Value::nil();
+        }
+        vm_->arrays().push_back(args[0].as_array_id(), args[1]);
+        return args[0];
+    });
+
+    // remove(array, index) -> removed value or nil
+    host_env_impl_->register_function("remove", [this](const std::vector<Value>& args) -> nightscript::Value {
+        using namespace nightscript;
+        if (args.size() != 2 || args[0].type() != ValueType::ARRAY) {
+            std::cerr << "remove: expected (array, index)" << std::endl;
+            return Value::nil();
+        }
+        ssize_t idx = 0;
+        if (args[1].type() == ValueType::INT) idx = static_cast<ssize_t>(args[1].as_integer());
+        else if (args[1].type() == ValueType::FLOAT) idx = static_cast<ssize_t>(args[1].as_floating());
+        else { std::cerr << "remove: index must be a number" << std::endl; return Value::nil(); }
+        return vm_->arrays().remove_at(args[0].as_array_id(), idx);
+    });
+
+    // clear(array) -> array
+    host_env_impl_->register_function("clear", [this](const std::vector<Value>& args) -> nightscript::Value {
+        using namespace nightscript;
+        if (args.size() != 1 || args[0].type() != ValueType::ARRAY) {
+            std::cerr << "clear: expected (array)" << std::endl;
+            return Value::nil();
+        }
+        vm_->arrays().clear(args[0].as_array_id());
+        return args[0];
     });
 
     // Simple test function

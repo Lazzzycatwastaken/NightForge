@@ -50,6 +50,7 @@ public:
     // String and buffer management
     StringTable& strings() { return strings_; }
     BufferTable& buffers() { return buffers_; }
+    ArrayTable& arrays() { return arrays_; }
     
     // Garbage collection
     void collect_garbage(const Chunk* active_chunk = nullptr);
@@ -104,6 +105,9 @@ private:
     // host functions are provided via HostEnvironment (host_env_)
     StringTable strings_;
     BufferTable buffers_;
+    ArrayTable array_table_;
+    // Back-compat alias for naming consistency
+    ArrayTable& arrays_ = array_table_;
     
     size_t bytes_allocated_since_gc_ = 0;
     

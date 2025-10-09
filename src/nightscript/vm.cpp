@@ -189,9 +189,16 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
         &&op_ADD_CONST_LOCAL, // OP_ADD_CONST_LOCAL
         &&op_ADD_LOCAL_CONST_FLOAT, // OP_ADD_LOCAL_CONST_FLOAT
         &&op_ADD_CONST_LOCAL_FLOAT, // OP_ADD_CONST_LOCAL_FLOAT
+        // Arrays
+        &&op_ARRAY_CREATE,    // OP_ARRAY_CREATE
+        &&op_ARRAY_GET,       // OP_ARRAY_GET
+        &&op_ARRAY_SET,       // OP_ARRAY_SET
+        &&op_ARRAY_LENGTH,    // OP_ARRAY_LENGTH
+        &&op_ARRAY_PUSH,      // OP_ARRAY_PUSH
+        &&op_ARRAY_POP,       // OP_ARRAY_POP
     };
 
-    constexpr size_t OPCODE_COUNT = static_cast<size_t>(OpCode::OP_ADD_CONST_LOCAL_FLOAT) + 1;
+    constexpr size_t OPCODE_COUNT = static_cast<size_t>(OpCode::OP_ARRAY_POP) + 1;
     static_assert(sizeof(dispatch_table) / sizeof(void*) == OPCODE_COUNT, "dispatch_table size must match OpCode count");
 
     if (ip >= end) return VMResult::OK;
@@ -887,6 +894,81 @@ op_ADD_CONST_LOCAL_FLOAT: {
     push(Value::floating(dc + da));
     SAFE_DISPATCH();
 }
+
+op_ARRAY_CREATE: {
+    COUNT_OPCODE(OP_ARRAY_CREATE);
+    // Next byte is element count (uint8)
+    uint8_t count = read_byte(ip);
+    uint32_t id = arrays_.create(count);
+    if (count > 0) {
+        Value* tmp = static_cast<Value*>(alloca(sizeof(Value) * count));
+        for (uint8_t i = 0; i < count; ++i) {
+            tmp[i] = pop();
+        }
+        for (int i = static_cast<int>(count) - 1; i >= 0; --i) {
+            arrays_.push_back(id, tmp[i]);
+        }
+    }
+    push(Value::array_id(id));
+    SAFE_DISPATCH();
+}
+
+op_ARRAY_GET: {
+    COUNT_OPCODE(OP_ARRAY_GET);
+    Value idxv = pop();
+    Value arrv = pop();
+    if (arrv.type() != ValueType::ARRAY) { runtime_error("INDEX: not an array"); return VMResult::RUNTIME_ERROR; }
+    ssize_t index = 0;
+    if (idxv.type() == ValueType::INT) index = static_cast<ssize_t>(idxv.as_integer());
+    else if (idxv.type() == ValueType::FLOAT) index = static_cast<ssize_t>(idxv.as_floating());
+    else { runtime_error("INDEX: index must be number"); return VMResult::RUNTIME_ERROR; }
+    Value val = arrays_.get(arrv.as_array_id(), index);
+    push(val);
+    SAFE_DISPATCH();
+}
+
+op_ARRAY_SET: {
+    COUNT_OPCODE(OP_ARRAY_SET);
+    Value value = pop();
+    Value idxv = pop();
+    Value arrv = pop();
+    if (arrv.type() != ValueType::ARRAY) { runtime_error("SETINDEX: not an array"); return VMResult::RUNTIME_ERROR; }
+    ssize_t index = 0;
+    if (idxv.type() == ValueType::INT) index = static_cast<ssize_t>(idxv.as_integer());
+    else if (idxv.type() == ValueType::FLOAT) index = static_cast<ssize_t>(idxv.as_floating());
+    else { runtime_error("SETINDEX: index must be number"); return VMResult::RUNTIME_ERROR; }
+    arrays_.set(arrv.as_array_id(), index, value);
+    push(value); // leave value on stack
+    SAFE_DISPATCH();
+}
+
+op_ARRAY_LENGTH: {
+    COUNT_OPCODE(OP_ARRAY_LENGTH);
+    Value arrv = pop();
+    if (arrv.type() != ValueType::ARRAY) { runtime_error("length: not an array"); return VMResult::RUNTIME_ERROR; }
+    size_t len = arrays_.length(arrv.as_array_id());
+    push(Value::integer(static_cast<int64_t>(len)));
+    SAFE_DISPATCH();
+}
+
+op_ARRAY_PUSH: {
+    COUNT_OPCODE(OP_ARRAY_PUSH);
+    Value value = pop();
+    Value arrv = pop();
+    if (arrv.type() != ValueType::ARRAY) { runtime_error("push: not an array"); return VMResult::RUNTIME_ERROR; }
+    arrays_.push_back(arrv.as_array_id(), value);
+    push(arrv); // return the array for chaining
+    SAFE_DISPATCH();
+}
+
+op_ARRAY_POP: {
+    COUNT_OPCODE(OP_ARRAY_POP);
+    Value arrv = pop();
+    if (arrv.type() != ValueType::ARRAY) { runtime_error("pop: not an array"); return VMResult::RUNTIME_ERROR; }
+    Value v = arrays_.pop_back(arrv.as_array_id());
+    push(v);
+    SAFE_DISPATCH();
+}
     return VMResult::OK;
 }
 
@@ -1103,6 +1185,13 @@ void VM::mark_reachable_strings(const Chunk* active_chunk) {
             strings_.mark_string_reachable(slot->as_string_id());
         } else if (slot->type() == ValueType::STRING_BUFFER) {
             buffers_.mark_buffer_reachable(slot->as_buffer_id());
+        } else if (slot->type() == ValueType::ARRAY) {
+            arrays_.mark_array_reachable(slot->as_array_id());
+            arrays_.for_each(slot->as_array_id(), [this](const Value& v){
+                if (v.type() == ValueType::STRING_ID) strings_.mark_string_reachable(v.as_string_id());
+                else if (v.type() == ValueType::STRING_BUFFER) buffers_.mark_buffer_reachable(v.as_buffer_id());
+                else if (v.type() == ValueType::ARRAY) arrays_.mark_array_reachable(v.as_array_id());
+            });
         }
     }
 
@@ -1112,6 +1201,13 @@ void VM::mark_reachable_strings(const Chunk* active_chunk) {
             strings_.mark_string_reachable(pair.second.as_string_id());
         } else if (pair.second.type() == ValueType::STRING_BUFFER) {
             buffers_.mark_buffer_reachable(pair.second.as_buffer_id());
+        } else if (pair.second.type() == ValueType::ARRAY) {
+            arrays_.mark_array_reachable(pair.second.as_array_id());
+            arrays_.for_each(pair.second.as_array_id(), [this](const Value& v){
+                if (v.type() == ValueType::STRING_ID) strings_.mark_string_reachable(v.as_string_id());
+                else if (v.type() == ValueType::STRING_BUFFER) buffers_.mark_buffer_reachable(v.as_buffer_id());
+                else if (v.type() == ValueType::ARRAY) arrays_.mark_array_reachable(v.as_array_id());
+            });
         }
     }
 
