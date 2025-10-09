@@ -10,7 +10,6 @@ std::unordered_map<std::string, TokenType> Lexer::keywords_ = {
     {"scene", TokenType::SCENE}, //these are in-engine only
     {"character", TokenType::CHARACTER},
     {"dialogue", TokenType::DIALOGUE},
-    {"table", TokenType::TABLE},
     {"for", TokenType::FOR},
     {"if", TokenType::IF},
     {"elseif", TokenType::ELSEIF},
@@ -134,6 +133,7 @@ Token Lexer::next_token() {
         case ')': return make_token(TokenType::RIGHT_PAREN);
         case ',': return make_token(TokenType::COMMA);
         case '.': return make_token(TokenType::DOT);
+        case ':': return make_token(TokenType::COLON);
         case '[': return make_token(TokenType::LEFT_BRACKET);
         case ']': return make_token(TokenType::RIGHT_BRACKET);
         default:

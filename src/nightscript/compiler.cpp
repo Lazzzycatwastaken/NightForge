@@ -196,26 +196,42 @@ void Compiler::expression_precedence(int min_precedence) {
         while (match(TokenType::LEFT_BRACKET)) {
             expression();
             consume(TokenType::RIGHT_BRACKET, "Expected ']' after index");
-            emit_byte(static_cast<uint8_t>(OpCode::OP_ARRAY_GET));
+            emit_byte(static_cast<uint8_t>(OpCode::OP_INDEX_GET));
             last_expression_type_ = InferredType::UNKNOWN;
         }
     } else if (match(TokenType::LEFT_BRACE)) {
-        // Array: { a, b, c }
-        // Parse elements
-        int count = 0;
-        if (!check(TokenType::RIGHT_BRACE)) {
+        // Could be Array: { a, b, c } or Dictionary: { key: value, key2: value2 }
+        // Look ahead to determine which one
+        if (check(TokenType::RIGHT_BRACE)) {
+            advance();
+            emit_byte(static_cast<uint8_t>(OpCode::OP_ARRAY_CREATE));
+            emit_byte(static_cast<uint8_t>(0));
+            last_expression_type_ = InferredType::UNKNOWN;
+        } else {
+            size_t saved_current = current_;
             expression();
-            count++;
-            while (match(TokenType::COMMA)) {
-                if (check(TokenType::RIGHT_BRACE)) break;
+            
+            if (match(TokenType::COLON)) {
                 expression();
-                count++;
+
+                emit_byte(static_cast<uint8_t>(OpCode::OP_TABLE_CREATE));
+                
+                advance();
+                error("Dictionary literals not yet fully implemented - use table syntax");
+                return;
+            } else {
+                int count = 1;
+                while (match(TokenType::COMMA)) {
+                    if (check(TokenType::RIGHT_BRACE)) break;
+                    expression();
+                    count++;
+                }
+                consume(TokenType::RIGHT_BRACE, "Expected '}' to close array literal");
+                emit_byte(static_cast<uint8_t>(OpCode::OP_ARRAY_CREATE));
+                emit_byte(static_cast<uint8_t>(count));
             }
+            last_expression_type_ = InferredType::UNKNOWN;
         }
-        consume(TokenType::RIGHT_BRACE, "Expected '}' to close array literal");
-        emit_byte(static_cast<uint8_t>(OpCode::OP_ARRAY_CREATE));
-        emit_byte(static_cast<uint8_t>(count));
-        last_expression_type_ = InferredType::UNKNOWN;
     } else {
         error("Expected expression");
         return;
@@ -393,8 +409,6 @@ void Compiler::statement() {
         }
         // local declarations do not emit runtime ops; they just reserve names
         return;
-    } else if (check(TokenType::TABLE)) {
-        table_declaration();
     // Check for assignment: identifier = expression
     } else if (check(TokenType::IDENTIFIER)) {
         // Look ahead to see if it's an assignment or a bare call
@@ -429,7 +443,7 @@ void Compiler::statement() {
             consume(TokenType::RIGHT_BRACKET, "Expected ']' after index");
             consume(TokenType::ASSIGN, "Expected '=' after index expression");
             expression(); // RHS
-            emit_byte(static_cast<uint8_t>(OpCode::OP_ARRAY_SET));
+            emit_byte(static_cast<uint8_t>(OpCode::OP_INDEX_SET));
             emit_byte(static_cast<uint8_t>(OpCode::OP_POP));
             return;
         } else if (next.type == TokenType::LEFT_PAREN) {
@@ -531,7 +545,7 @@ bool Compiler::try_sugar_statement() {
             while (match(TokenType::LEFT_BRACKET)) {
                 expression();
                 consume(TokenType::RIGHT_BRACKET, "Expected ']' after index");
-                emit_byte(static_cast<uint8_t>(OpCode::OP_ARRAY_GET));
+                emit_byte(static_cast<uint8_t>(OpCode::OP_INDEX_GET));
             }
         } else {
             error("Expected a list after 'to' in 'add' statement");
@@ -860,6 +874,7 @@ void Compiler::function_declaration() {
     current_local_locals_.clear();
 }
 
+/*
 void Compiler::table_declaration() {
     consume(TokenType::TABLE, "Expected 'table'");
     
@@ -922,6 +937,7 @@ void Compiler::table_declaration() {
     emit_byte(static_cast<uint8_t>(OpCode::OP_SET_GLOBAL));
     emit_byte(static_cast<uint8_t>(name_constant));
 }
+*/
 
 void Compiler::call_expression() {
     Token name = previous_token();

@@ -86,6 +86,20 @@ enum class OpCode : uint8_t {
     OP_ARRAY_LENGTH,
     OP_ARRAY_PUSH,
     OP_ARRAY_POP,
+    
+    // Table/Dictionary operations
+    OP_TABLE_CREATE,
+    OP_TABLE_GET,
+    OP_TABLE_SET,
+    OP_TABLE_HAS,
+    OP_TABLE_KEYS,
+    OP_TABLE_VALUES,
+    OP_TABLE_SIZE,
+    OP_TABLE_REMOVE,
+    
+    // Generic indexing
+    OP_INDEX_GET,
+    OP_INDEX_SET,
 };
 
 // Value types (classification)
@@ -344,6 +358,40 @@ private:
     };
 
     std::vector<ArrayEntry> arrays_;
+    std::vector<uint32_t> free_slots_;
+};
+
+class TableTable { //creative mastermind
+public:
+    uint32_t create();
+    Value get(uint32_t id, const std::string& key) const;
+    Value get(uint32_t id, uint32_t key_id, const StringTable& strings) const;
+    void set(uint32_t id, const std::string& key, const Value& value);
+    void set(uint32_t id, uint32_t key_id, const Value& value, const StringTable& strings);
+    bool has_key(uint32_t id, const std::string& key) const;
+    bool has_key(uint32_t id, uint32_t key_id, const StringTable& strings) const;
+    bool remove_key(uint32_t id, const std::string& key);
+    bool remove_key(uint32_t id, uint32_t key_id, const StringTable& strings);
+    void clear(uint32_t id);
+    size_t size(uint32_t id) const;
+    
+    // Get all keys/values as arrays for iteration
+    std::vector<std::string> get_keys(uint32_t id) const;
+    std::vector<Value> get_values(uint32_t id) const;
+    std::vector<std::pair<std::string, Value>> get_pairs(uint32_t id) const;
+
+    // GC support
+    void mark_table_reachable(uint32_t id);
+    void clear_gc_marks();
+    void for_each(uint32_t id, const std::function<void(const Value&)>& fn) const;
+
+private:
+    struct TableEntry {
+        std::unordered_map<std::string, Value> data;
+        bool gc_marked = false;
+    };
+
+    std::vector<TableEntry> tables_;
     std::vector<uint32_t> free_slots_;
 };
 

@@ -359,6 +359,126 @@ void ArrayTable::for_each(uint32_t id, const std::function<void(const Value&)>& 
     for (const auto &val : vec) fn(val);
 }
 
+uint32_t TableTable::create() {
+    uint32_t id;
+    if (!free_slots_.empty()) {
+        id = free_slots_.back();
+        free_slots_.pop_back();
+        tables_[id] = TableEntry{};
+    } else {
+        id = static_cast<uint32_t>(tables_.size());
+        tables_.push_back(TableEntry{});
+    }
+    return id;
+}
+
+Value TableTable::get(uint32_t id, const std::string& key) const {
+    if (id >= tables_.size()) return Value::nil();
+    const auto& table = tables_[id].data;
+    auto it = table.find(key);
+    return (it != table.end()) ? it->second : Value::nil();
+}
+
+Value TableTable::get(uint32_t id, uint32_t key_id, const StringTable& strings) const {
+    if (id >= tables_.size()) return Value::nil();
+    const std::string& key = strings.get_string(key_id);
+    return get(id, key);
+}
+
+void TableTable::set(uint32_t id, const std::string& key, const Value& value) {
+    if (id >= tables_.size()) return;
+    tables_[id].data[key] = value;
+}
+
+void TableTable::set(uint32_t id, uint32_t key_id, const Value& value, const StringTable& strings) {
+    if (id >= tables_.size()) return;
+    const std::string& key = strings.get_string(key_id);
+    set(id, key, value);
+}
+
+bool TableTable::has_key(uint32_t id, const std::string& key) const {
+    if (id >= tables_.size()) return false;
+    const auto& table = tables_[id].data;
+    return table.find(key) != table.end();
+}
+
+bool TableTable::has_key(uint32_t id, uint32_t key_id, const StringTable& strings) const {
+    if (id >= tables_.size()) return false;
+    const std::string& key = strings.get_string(key_id);
+    return has_key(id, key);
+}
+
+bool TableTable::remove_key(uint32_t id, const std::string& key) {
+    if (id >= tables_.size()) return false;
+    auto& table = tables_[id].data;
+    return table.erase(key) > 0;
+}
+
+bool TableTable::remove_key(uint32_t id, uint32_t key_id, const StringTable& strings) {
+    if (id >= tables_.size()) return false;
+    const std::string& key = strings.get_string(key_id);
+    return remove_key(id, key);
+}
+
+void TableTable::clear(uint32_t id) {
+    if (id >= tables_.size()) return;
+    tables_[id].data.clear();
+}
+
+size_t TableTable::size(uint32_t id) const {
+    if (id >= tables_.size()) return 0;
+    return tables_[id].data.size();
+}
+
+std::vector<std::string> TableTable::get_keys(uint32_t id) const {
+    std::vector<std::string> keys;
+    if (id >= tables_.size()) return keys;
+    const auto& table = tables_[id].data;
+    keys.reserve(table.size());
+    for (const auto& pair : table) {
+        keys.push_back(pair.first);
+    }
+    return keys;
+}
+
+std::vector<Value> TableTable::get_values(uint32_t id) const {
+    std::vector<Value> values;
+    if (id >= tables_.size()) return values;
+    const auto& table = tables_[id].data;
+    values.reserve(table.size());
+    for (const auto& pair : table) {
+        values.push_back(pair.second);
+    }
+    return values;
+}
+
+std::vector<std::pair<std::string, Value>> TableTable::get_pairs(uint32_t id) const {
+    std::vector<std::pair<std::string, Value>> pairs;
+    if (id >= tables_.size()) return pairs;
+    const auto& table = tables_[id].data;
+    pairs.reserve(table.size());
+    for (const auto& pair : table) {
+        pairs.push_back(pair);
+    }
+    return pairs;
+}
+
+void TableTable::mark_table_reachable(uint32_t id) {
+    if (id < tables_.size()) tables_[id].gc_marked = true;
+}
+
+void TableTable::clear_gc_marks() {
+    for (auto &t : tables_) t.gc_marked = false;
+}
+
+void TableTable::for_each(uint32_t id, const std::function<void(const Value&)>& fn) const {
+    if (id >= tables_.size()) return;
+    const auto& table = tables_[id].data;
+    for (const auto& pair : table) {
+        fn(pair.second);
+    }
+}
+
 
 } // namespace nightscript
 } // namespace nightforge

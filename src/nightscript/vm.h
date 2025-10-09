@@ -51,6 +51,7 @@ public:
     StringTable& strings() { return strings_; }
     BufferTable& buffers() { return buffers_; }
     ArrayTable& arrays() { return arrays_; }
+    TableTable& tables() { return tables_; }
     
     // Garbage collection
     void collect_garbage(const Chunk* active_chunk = nullptr);
@@ -106,8 +107,10 @@ private:
     StringTable strings_;
     BufferTable buffers_;
     ArrayTable array_table_;
+    TableTable table_table_;
     // Back-compat alias for naming consistency
     ArrayTable& arrays_ = array_table_;
+    TableTable& tables_ = table_table_;
     
     size_t bytes_allocated_since_gc_ = 0;
     

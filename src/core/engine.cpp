@@ -709,6 +709,73 @@ void Engine::setup_host_functions() {
         return args[0];
     });
 
+    host_env_impl_->register_function("table", [this](const std::vector<Value>& args) -> nightscript::Value {
+        using namespace nightscript;
+        if (args.size() != 0) {
+            std::cerr << "table: expected no arguments" << std::endl;
+            return Value::nil();
+        }
+        uint32_t id = vm_->tables().create();
+        return Value::table_id(id);
+    });
+
+    host_env_impl_->register_function("has_key", [this](const std::vector<Value>& args) -> nightscript::Value {
+        using namespace nightscript;
+        if (args.size() != 2 || args[0].type() != ValueType::TABLE_ID || args[1].type() != ValueType::STRING_ID) {
+            std::cerr << "has_key: expected (table, string_key)" << std::endl;
+            return Value::nil();
+        }
+        bool has = vm_->tables().has_key(args[0].as_table_id(), args[1].as_string_id(), vm_->strings());
+        return Value::boolean(has);
+    });
+
+    host_env_impl_->register_function("keys", [this](const std::vector<Value>& args) -> nightscript::Value {
+        using namespace nightscript;
+        if (args.size() != 1 || args[0].type() != ValueType::TABLE_ID) {
+            std::cerr << "keys: expected (table)" << std::endl;
+            return Value::nil();
+        }
+        std::vector<std::string> keys = vm_->tables().get_keys(args[0].as_table_id());
+        uint32_t arr_id = vm_->arrays().create(keys.size());
+        for (const auto& key : keys) {
+            uint32_t str_id = vm_->strings().intern(key);
+            vm_->arrays().push_back(arr_id, Value::string_id(str_id));
+        }
+        return Value::array_id(arr_id);
+    });
+
+    host_env_impl_->register_function("values", [this](const std::vector<Value>& args) -> nightscript::Value {
+        using namespace nightscript;
+        if (args.size() != 1 || args[0].type() != ValueType::TABLE_ID) {
+            std::cerr << "values: expected (table)" << std::endl;
+            return Value::nil();
+        }
+        std::vector<Value> values = vm_->tables().get_values(args[0].as_table_id());
+        uint32_t arr_id = vm_->arrays().create(values.size());
+        for (const auto& value : values) {
+            vm_->arrays().push_back(arr_id, value);
+        }
+        return Value::array_id(arr_id);
+    });
+
+    host_env_impl_->register_function("size", [this](const std::vector<Value>& args) -> nightscript::Value {
+        using namespace nightscript;
+        if (args.size() != 1) {
+            std::cerr << "size: expected 1 argument" << std::endl;
+            return Value::nil();
+        }
+        if (args[0].type() == ValueType::TABLE_ID) {
+            size_t s = vm_->tables().size(args[0].as_table_id());
+            return Value::integer(static_cast<int64_t>(s));
+        } else if (args[0].type() == ValueType::ARRAY) {
+            size_t s = vm_->arrays().length(args[0].as_array_id());
+            return Value::integer(static_cast<int64_t>(s));
+        } else {
+            std::cerr << "size: expected table or array" << std::endl;
+            return Value::nil();
+        }
+    });
+
     // Simple test function
     // vm_->register_host_function("test_add", [](const std::vector<Value>& args) -> Value {
     //     if (args.size() != 2) {

@@ -18,7 +18,6 @@ enum class TokenType {
     SCENE,
     CHARACTER,
     DIALOGUE,
-    TABLE,
     FOR,
     IF,
     ELSEIF,
@@ -60,6 +59,7 @@ enum class TokenType {
     RIGHT_PAREN,  // )
     COMMA,        // ,
     DOT,          // .
+    COLON,        // :
     LEFT_BRACKET, // [
     RIGHT_BRACKET,// ]
     

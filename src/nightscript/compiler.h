@@ -84,7 +84,7 @@ private:
     size_t emit_jump(uint8_t instruction);
     void patch_jump(size_t jump_position);
     void function_declaration();
-    void table_declaration();
+    // void table_declaration(); using table() function instead
     void call_expression();
     
     // Helper methods

@@ -196,9 +196,21 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
         &&op_ARRAY_LENGTH,    // OP_ARRAY_LENGTH
         &&op_ARRAY_PUSH,      // OP_ARRAY_PUSH
         &&op_ARRAY_POP,       // OP_ARRAY_POP
+        // Tables/Dictionaries
+        &&op_TABLE_CREATE,    // OP_TABLE_CREATE
+        &&op_TABLE_GET,       // OP_TABLE_GET
+        &&op_TABLE_SET,       // OP_TABLE_SET
+        &&op_TABLE_HAS,       // OP_TABLE_HAS
+        &&op_TABLE_KEYS,      // OP_TABLE_KEYS
+        &&op_TABLE_VALUES,    // OP_TABLE_VALUES
+        &&op_TABLE_SIZE,      // OP_TABLE_SIZE
+        &&op_TABLE_REMOVE,    // OP_TABLE_REMOVE
+        // Generic indexing
+        &&op_INDEX_GET,       // OP_INDEX_GET
+        &&op_INDEX_SET,       // OP_INDEX_SET
     };
 
-    constexpr size_t OPCODE_COUNT = static_cast<size_t>(OpCode::OP_ARRAY_POP) + 1;
+    constexpr size_t OPCODE_COUNT = static_cast<size_t>(OpCode::OP_INDEX_SET) + 1;
     static_assert(sizeof(dispatch_table) / sizeof(void*) == OPCODE_COUNT, "dispatch_table size must match OpCode count");
 
     if (ip >= end) return VMResult::OK;
@@ -1017,6 +1029,145 @@ op_ARRAY_POP: {
     if (arrv.type() != ValueType::ARRAY) { runtime_error("pop: not an array"); return VMResult::RUNTIME_ERROR; }
     Value v = arrays_.pop_back(arrv.as_array_id());
     push(v);
+    SAFE_DISPATCH();
+}
+
+op_TABLE_CREATE: {
+    COUNT_OPCODE(OP_TABLE_CREATE);
+    uint32_t id = tables_.create();
+    push(Value::table_id(id));
+    SAFE_DISPATCH();
+}
+
+op_TABLE_GET: {
+    COUNT_OPCODE(OP_TABLE_GET);
+    Value keyv = pop();
+    Value tablev = pop();
+    if (tablev.type() != ValueType::TABLE_ID) { runtime_error("TABLE_GET: not a table"); return VMResult::RUNTIME_ERROR; }
+    if (keyv.type() != ValueType::STRING_ID) { runtime_error("TABLE_GET: key must be string"); return VMResult::RUNTIME_ERROR; }
+    Value val = tables_.get(tablev.as_table_id(), keyv.as_string_id(), strings_);
+    push(val);
+    SAFE_DISPATCH();
+}
+
+op_TABLE_SET: {
+    COUNT_OPCODE(OP_TABLE_SET);
+    Value value = pop();
+    Value keyv = pop();
+    Value tablev = pop();
+    if (tablev.type() != ValueType::TABLE_ID) { runtime_error("TABLE_SET: not a table"); return VMResult::RUNTIME_ERROR; }
+    if (keyv.type() != ValueType::STRING_ID) { runtime_error("TABLE_SET: key must be string"); return VMResult::RUNTIME_ERROR; }
+    tables_.set(tablev.as_table_id(), keyv.as_string_id(), value, strings_);
+    push(tablev); // leave table on stack for chaining
+    SAFE_DISPATCH();
+}
+
+op_TABLE_HAS: {
+    COUNT_OPCODE(OP_TABLE_HAS);
+    Value keyv = pop();
+    Value tablev = pop();
+    if (tablev.type() != ValueType::TABLE_ID) { runtime_error("TABLE_HAS: not a table"); return VMResult::RUNTIME_ERROR; }
+    if (keyv.type() != ValueType::STRING_ID) { runtime_error("TABLE_HAS: key must be string"); return VMResult::RUNTIME_ERROR; }
+    bool has = tables_.has_key(tablev.as_table_id(), keyv.as_string_id(), strings_);
+    push(Value::boolean(has));
+    SAFE_DISPATCH();
+}
+
+op_TABLE_SIZE: {
+    COUNT_OPCODE(OP_TABLE_SIZE);
+    Value tablev = pop();
+    if (tablev.type() != ValueType::TABLE_ID) { runtime_error("TABLE_SIZE: not a table"); return VMResult::RUNTIME_ERROR; }
+    size_t size = tables_.size(tablev.as_table_id());
+    push(Value::integer(static_cast<int64_t>(size)));
+    SAFE_DISPATCH();
+}
+
+op_TABLE_KEYS: {
+    COUNT_OPCODE(OP_TABLE_KEYS);
+    Value tablev = pop();
+    if (tablev.type() != ValueType::TABLE_ID) { runtime_error("TABLE_KEYS: not a table"); return VMResult::RUNTIME_ERROR; }
+    std::vector<std::string> keys = tables_.get_keys(tablev.as_table_id());
+    uint32_t arr_id = arrays_.create(keys.size());
+    for (const auto& key : keys) {
+        uint32_t str_id = strings_.intern(key);
+        arrays_.push_back(arr_id, Value::string_id(str_id));
+    }
+    push(Value::array_id(arr_id));
+    SAFE_DISPATCH();
+}
+
+op_TABLE_VALUES: {
+    COUNT_OPCODE(OP_TABLE_VALUES);
+    Value tablev = pop();
+    if (tablev.type() != ValueType::TABLE_ID) { runtime_error("TABLE_VALUES: not a table"); return VMResult::RUNTIME_ERROR; }
+    std::vector<Value> values = tables_.get_values(tablev.as_table_id());
+    uint32_t arr_id = arrays_.create(values.size());
+    for (const auto& value : values) {
+        arrays_.push_back(arr_id, value);
+    }
+    push(Value::array_id(arr_id));
+    SAFE_DISPATCH();
+}
+
+op_TABLE_REMOVE: {
+    COUNT_OPCODE(OP_TABLE_REMOVE);
+    Value keyv = pop();
+    Value tablev = pop();
+    if (tablev.type() != ValueType::TABLE_ID) { runtime_error("TABLE_REMOVE: not a table"); return VMResult::RUNTIME_ERROR; }
+    if (keyv.type() != ValueType::STRING_ID) { runtime_error("TABLE_REMOVE: key must be string"); return VMResult::RUNTIME_ERROR; }
+    bool removed = tables_.remove_key(tablev.as_table_id(), keyv.as_string_id(), strings_);
+    push(Value::boolean(removed));
+    SAFE_DISPATCH();
+}
+
+op_INDEX_GET: {
+    COUNT_OPCODE(OP_INDEX_GET);
+    Value keyv = pop();
+    Value objv = pop();
+    
+    if (objv.type() == ValueType::ARRAY) {
+        // Array indexing
+        ssize_t index = 0;
+        if (keyv.type() == ValueType::INT) index = static_cast<ssize_t>(keyv.as_integer());
+        else if (keyv.type() == ValueType::FLOAT) index = static_cast<ssize_t>(keyv.as_floating());
+        else { runtime_error("INDEX_GET: array index must be number"); return VMResult::RUNTIME_ERROR; }
+        Value val = arrays_.get(objv.as_array_id(), index);
+        push(val);
+    } else if (objv.type() == ValueType::TABLE_ID) {
+        // Table indexing
+        if (keyv.type() != ValueType::STRING_ID) { runtime_error("INDEX_GET: table key must be string"); return VMResult::RUNTIME_ERROR; }
+        Value val = tables_.get(objv.as_table_id(), keyv.as_string_id(), strings_);
+        push(val);
+    } else {
+        runtime_error("INDEX_GET: can only index arrays and tables");
+        return VMResult::RUNTIME_ERROR;
+    }
+    SAFE_DISPATCH();
+}
+
+op_INDEX_SET: {
+    COUNT_OPCODE(OP_INDEX_SET);
+    Value value = pop();
+    Value keyv = pop();
+    Value objv = pop();
+    
+    if (objv.type() == ValueType::ARRAY) {
+        // Array indexing
+        ssize_t index = 0;
+        if (keyv.type() == ValueType::INT) index = static_cast<ssize_t>(keyv.as_integer());
+        else if (keyv.type() == ValueType::FLOAT) index = static_cast<ssize_t>(keyv.as_floating());
+        else { runtime_error("INDEX_SET: array index must be number"); return VMResult::RUNTIME_ERROR; }
+        arrays_.set(objv.as_array_id(), index, value);
+        push(value); // leave value on stack
+    } else if (objv.type() == ValueType::TABLE_ID) {
+        // Table indexing
+        if (keyv.type() != ValueType::STRING_ID) { runtime_error("INDEX_SET: table key must be string"); return VMResult::RUNTIME_ERROR; }
+        tables_.set(objv.as_table_id(), keyv.as_string_id(), value, strings_);
+        push(value); // leave value on stack
+    } else {
+        runtime_error("INDEX_SET: can only index arrays and tables");
+        return VMResult::RUNTIME_ERROR;
+    }
     SAFE_DISPATCH();
 }
     return VMResult::OK;
