@@ -8,12 +8,19 @@
 
 A high-performance terminal-based game engine written in C++ with NightScript language support.
 
-## Building
+## Quick Start
 
+### Windows
+**Installer available!** Simply double-click `install.bat` or run:
+```powershell
+.\install.ps1 -AddToPath
+```
+
+### Linux/macOS
 ```bash
 mkdir build && cd build
 cmake ..
-make
+make -j$(nproc)
 ```
 
 ## Usage
