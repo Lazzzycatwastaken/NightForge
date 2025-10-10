@@ -1,4 +1,5 @@
 #include "engine.h"
+#include "../nightscript/stdlib/string.h"
 #include <iostream>
 #include <fstream>
 #include <cstdio>
@@ -284,6 +285,9 @@ void Engine::execute_script_file(const std::string& filename) {
 
 void Engine::setup_host_functions() {
     using namespace nightscript;
+
+    // Register stdlib functions
+    stdlib::register_string_functions(host_env_impl_.get(), vm_.get());
 
     // show_text(string) - display text in dialogue panel
     host_env_impl_->register_function("show_text", [this](const std::vector<Value>& args) -> nightscript::Value {

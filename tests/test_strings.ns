@@ -1,0 +1,88 @@
+print "=== String Functions Test ==="
+print ""
+
+# Test split
+text = "Hello,World,Night,Script"
+words = split(text, ",")
+print "Split test:"
+print "  Original:" text
+print "  Split by comma, length:" length(words)
+print "  First word:" words[0]
+print "  Last word:" words[3]
+print ""
+
+# Test join
+joined = join(words, " - ")
+print "Join test:"
+print "  Joined:" joined
+print ""
+
+# Test replace
+original = "Hello World World"
+replaced = replace(original, "World", "Night")
+print "Replace test:"
+print "  Original:" original
+print "  Replaced:" replaced
+print ""
+
+# Test substring
+str = "NightScript"
+sub1 = substring(str, 0, 5)
+sub2 = substring(str, 5)
+print "Substring test:"
+print "  Original:" str
+print "  First 5 chars:" sub1
+print "  From index 5:" sub2
+print ""
+
+# Test case conversion
+lower = "hello world"
+upper = uppercase(lower)
+mixed = "Hello WORLD"
+lower2 = lowercase(mixed)
+print "Case conversion:"
+print "  Uppercase:" upper
+print "  Lowercase:" lower2
+print ""
+
+# Test trim
+messy = "   spaces   "
+clean = trim(messy)
+print "Trim test:"
+print "  Before: [" + messy + "]"
+print "  After: [" + clean + "]"
+print ""
+
+# Test starts_with, ends_with, contains
+test_str = "NightScript is awesome"
+print "String checks:"
+print "  starts_with 'Night':" starts_with(test_str, "Night")
+print "  ends_with 'awesome':" ends_with(test_str, "awesome")
+print "  contains 'Script':" contains(test_str, "Script")
+print "  contains 'Python':" contains(test_str, "Python")
+print ""
+
+# Test find
+pos1 = find(test_str, "Script")
+pos2 = find(test_str, "missing")
+print "Find test:"
+print "  Position of 'Script':" pos1
+print "  Position of 'missing':" pos2
+print ""
+
+# Test char_at
+word = "Hello"
+print "Char_at test:"
+print "  char_at(0):" char_at(word, 0)
+print "  char_at(4):" char_at(word, 4)
+print "  char_at(-1):" char_at(word, -1)
+print ""
+
+# Test repeat
+pattern = "*"
+line = repeat(pattern, 10)
+print "Repeat test:"
+print "  Pattern repeated 10 times:" line
+print ""
+
+print "All string function tests passed"

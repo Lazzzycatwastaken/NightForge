@@ -34,3 +34,4 @@ perf_test_with_host.ns
 simple_test.ns
 string_test.ns
 test_optimized_opcodes.ns
+docs/
