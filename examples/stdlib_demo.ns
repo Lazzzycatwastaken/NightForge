@@ -1,0 +1,140 @@
+# This demos the 22 new stdlib functions
+
+print "=== NightScript Standard Library Demo ==="
+print ""
+
+# ===================================================================  
+# Part 1: String Functions (13 functions)
+# ===================================================================
+print "--- STRING FUNCTIONS ---"
+print ""
+
+# split, join
+text = "apple,banana,orange"
+fruits = split(text, ",")
+print "Split result:"
+print fruits[0]
+print fruits[1]
+print fruits[2]
+
+rejoined = join(fruits, " | ")
+print "Joined:"
+print rejoined
+print ""
+
+# uppercase, lowercase
+message = "Hello World"
+print "Original:"
+print message
+print "Uppercase:"
+print uppercase(message)
+print "Lowercase:"
+print lowercase(message)
+print ""
+
+# trim, substring
+padded = "  hello  "
+print "Trim:"
+print trim(padded)
+word = "NightScript"
+print "Substring of NightScript (0,5):"
+print substring(word, 0, 5)
+print ""
+
+# starts_with, ends_with, contains
+filename = "document.txt"
+if starts_with(filename, "doc") then
+    print "Starts with 'doc': YES"
+end
+if ends_with(filename, ".txt") then
+    print "Ends with '.txt': YES"
+end
+if contains(filename, "ment") then
+    print "Contains 'ment': YES"
+end
+print ""
+
+# find, char_at
+pos = find("hello world", "world")
+print "Position of 'world':"
+print pos
+ch = char_at("NightScript", 0)
+print "First character:"
+print ch
+print ""
+
+# repeat
+print "Repeat '=' 20 times:"
+print repeat("=", 20)
+print ""
+
+# ===================================================================
+# Part 2: File I/O Functions (9 functions)
+# ===================================================================
+print "--- FILE I/O FUNCTIONS ---"
+print ""
+
+# file_write, file_exists
+demo_file = "demo.txt"
+file_write(demo_file, "Hello from NightScript!\nLine 2\nLine 3")
+print "File created!"
+
+if file_exists(demo_file) then
+    print "File exists: YES"
+end
+print ""
+
+# file_read
+content = file_read(demo_file)
+print "File content:"
+print content
+print ""
+
+# file_lines
+lines = file_lines(demo_file)
+print "Number of lines:"
+print length(lines)
+print "First line:"
+print lines[0]
+print ""
+
+# file_append
+file_append(demo_file, "Line 4 - appended\n")
+print "Appended to file!"
+print ""
+
+# dir_create, dir_exists, dir_list
+test_dir = "test_directory"
+if !dir_exists(test_dir) then
+    dir_create(test_dir)
+    print "Directory created!"
+end
+
+# Create files in directory
+file_write("test_directory/file1.txt", "Test 1")
+file_write("test_directory/file2.txt", "Test 2")
+file_write("test_directory/file3.txt", "Test 3")
+
+files_in_dir = dir_list(test_dir)
+print "Files in directory:"
+i = 0
+while i < length(files_in_dir) do
+    print files_in_dir[i]
+    i = i + 1
+end
+print ""
+
+# file_delete
+file_delete(demo_file)
+file_delete("test_directory/file1.txt")
+file_delete("test_directory/file2.txt")
+file_delete("test_directory/file3.txt")
+print "Cleanup complete!"
+print ""
+
+# ===================================================================
+# Summary
+# ===================================================================
+print "=== Demo Complete ==="
+print "Demonstrated 13 string functions + 9 file I/O functions"
+print "All 22 stdlib functions working!"

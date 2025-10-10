@@ -1,5 +1,6 @@
 #include "engine.h"
 #include "../nightscript/stdlib/string.h"
+#include "../nightscript/stdlib/file.h"
 #include <iostream>
 #include <fstream>
 #include <cstdio>
@@ -288,6 +289,7 @@ void Engine::setup_host_functions() {
 
     // Register stdlib functions
     stdlib::register_string_functions(host_env_impl_.get(), vm_.get());
+    stdlib::register_file_functions(host_env_impl_.get(), vm_.get());
 
     // show_text(string) - display text in dialogue panel
     host_env_impl_->register_function("show_text", [this](const std::vector<Value>& args) -> nightscript::Value {
@@ -711,6 +713,17 @@ void Engine::setup_host_functions() {
         }
         vm_->arrays().clear(args[0].as_array_id());
         return args[0];
+    });
+
+    // array() -> creates empty array
+    host_env_impl_->register_function("array", [this](const std::vector<Value>& args) -> nightscript::Value {
+        using namespace nightscript;
+        if (args.size() != 0) {
+            std::cerr << "array: expected no arguments" << std::endl;
+            return Value::nil();
+        }
+        uint32_t id = vm_->arrays().create(0);
+        return Value::array_id(id);
     });
 
     host_env_impl_->register_function("table", [this](const std::vector<Value>& args) -> nightscript::Value {
