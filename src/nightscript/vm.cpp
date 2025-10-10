@@ -169,6 +169,9 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
         &&op_LESS,            // OP_LESS
         &&op_NOT,             // OP_NOT
 
+        &&op_AND,             // OP_AND
+        &&op_OR,              // OP_OR
+
         &&op_JUMP,            // OP_JUMP
         &&op_JUMP_IF_FALSE,   // OP_JUMP_IF_FALSE
         &&op_JUMP_BACK,       // OP_JUMP_BACK
@@ -499,6 +502,24 @@ op_LESS: {
 op_NOT: {
     COUNT_OPCODE(OP_NOT);
     Value value = pop(); bool is_falsy = (value.type() == ValueType::NIL) || (value.type() == ValueType::BOOL && !value.as_boolean()); push(Value::boolean(is_falsy)); SAFE_DISPATCH();
+}
+
+op_AND: {
+    COUNT_OPCODE(OP_AND);
+    Value b = pop(); Value a = pop(); 
+    bool a_truthy = !((a.type() == ValueType::NIL) || (a.type() == ValueType::BOOL && !a.as_boolean()));
+    bool b_truthy = !((b.type() == ValueType::NIL) || (b.type() == ValueType::BOOL && !b.as_boolean()));
+    push(Value::boolean(a_truthy && b_truthy)); 
+    SAFE_DISPATCH();
+}
+
+op_OR: {
+    COUNT_OPCODE(OP_OR);
+    Value b = pop(); Value a = pop(); 
+    bool a_truthy = !((a.type() == ValueType::NIL) || (a.type() == ValueType::BOOL && !a.as_boolean()));
+    bool b_truthy = !((b.type() == ValueType::NIL) || (b.type() == ValueType::BOOL && !b.as_boolean()));
+    push(Value::boolean(a_truthy || b_truthy)); 
+    SAFE_DISPATCH();
 }
 
 op_JUMP: {

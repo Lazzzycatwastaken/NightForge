@@ -57,6 +57,10 @@ enum class OpCode : uint8_t {
     OP_LESS,
     OP_NOT,
     
+    // Logical
+    OP_AND,
+    OP_OR,
+    
     // Control flow
     OP_JUMP,         // unconditional jump
     OP_JUMP_IF_FALSE, // conditional jump

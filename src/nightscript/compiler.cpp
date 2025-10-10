@@ -822,14 +822,33 @@ void Compiler::if_statement() {
 
     size_t jump_to_else = emit_jump(static_cast<uint8_t>(OpCode::OP_JUMP_IF_FALSE));
 
-    // compile then branch statements until ELSE or END
-    while (!check(TokenType::ELSE) && !check(TokenType::END) && !check(TokenType::EOF_TOKEN)) {
+    while (!check(TokenType::ELSEIF) && !check(TokenType::ELSE) && !check(TokenType::END) && !check(TokenType::EOF_TOKEN)) {
         statement();
     }
 
     size_t jump_over_else = emit_jump(static_cast<uint8_t>(OpCode::OP_JUMP));
 
     patch_jump(jump_to_else);
+
+    std::vector<size_t> exit_jumps;
+    exit_jumps.push_back(jump_over_else);
+
+    while (match(TokenType::ELSEIF)) {
+        expression();
+        
+        consume(TokenType::THEN, "Expected 'then' after elseif condition");
+        
+        size_t elseif_jump = emit_jump(static_cast<uint8_t>(OpCode::OP_JUMP_IF_FALSE));
+        
+        while (!check(TokenType::ELSEIF) && !check(TokenType::ELSE) && !check(TokenType::END) && !check(TokenType::EOF_TOKEN)) {
+            statement();
+        }
+        
+        size_t exit_jump = emit_jump(static_cast<uint8_t>(OpCode::OP_JUMP));
+        exit_jumps.push_back(exit_jump);
+
+        patch_jump(elseif_jump);
+    }
 
     if (match(TokenType::ELSE)) {
         // compile else branch
@@ -840,7 +859,9 @@ void Compiler::if_statement() {
 
     consume(TokenType::END, "Expected 'end' to close an if statement");
 
-    patch_jump(jump_over_else);
+    for (size_t jump : exit_jumps) {
+        patch_jump(jump);
+    }
 }
 
 void Compiler::while_statement() {
@@ -1297,16 +1318,20 @@ int Compiler::get_precedence(TokenType type) {
         case TokenType::MULTIPLY:
         case TokenType::DIVIDE:
         case TokenType::MODULO:
-            return 3;
+            return 5;
         case TokenType::PLUS:
         case TokenType::MINUS:
-            return 2;
+            return 4;
         case TokenType::EQUAL:
         case TokenType::NOT_EQUAL:
         case TokenType::GREATER:
         case TokenType::GREATER_EQUAL:
         case TokenType::LESS:
         case TokenType::LESS_EQUAL:
+            return 3;
+        case TokenType::AND:
+            return 2;
+        case TokenType::OR:
             return 1;
         default:
             return 0;
@@ -1326,6 +1351,8 @@ bool Compiler::is_binary_operator(TokenType type) {
         case TokenType::GREATER_EQUAL:
         case TokenType::LESS:
         case TokenType::LESS_EQUAL:
+        case TokenType::AND:
+        case TokenType::OR:
             return true;
         default:
             return false;
@@ -1344,6 +1371,8 @@ OpCode Compiler::token_to_opcode(TokenType type) {
         case TokenType::GREATER_EQUAL: return OpCode::OP_GREATER_EQUAL;
         case TokenType::LESS: return OpCode::OP_LESS;
         case TokenType::LESS_EQUAL: return OpCode::OP_LESS_EQUAL;
+        case TokenType::AND: return OpCode::OP_AND;
+        case TokenType::OR: return OpCode::OP_OR;
         default:
             error("UNKNOWN binary operator");
             return OpCode::OP_ADD; // fallback
@@ -1493,49 +1522,61 @@ void Compiler::emit_optimized_binary_op(TokenType op, InferredType left_type, In
             uint8_t p0 = code[n2-1];
 
             if (static_cast<OpCode>(p3) == OpCode::OP_GET_LOCAL && static_cast<OpCode>(p1) == OpCode::OP_GET_LOCAL) {
-                uint8_t idx_a = p2;
-                uint8_t idx_b = p0;
-                OpCode fused = OpCode::OP_ADD_LOCAL;
-                if (specialized_op == OpCode::OP_ADD_FLOAT) fused = OpCode::OP_ADD_FLOAT_LOCAL;
-                else if (specialized_op == OpCode::OP_ADD_STRING) fused = OpCode::OP_ADD_STRING_LOCAL;
+                // Only fuse for ADD operations
+                if (specialized_op == OpCode::OP_ADD || specialized_op == OpCode::OP_ADD_INT || 
+                    specialized_op == OpCode::OP_ADD_FLOAT || specialized_op == OpCode::OP_ADD_STRING) {
+                    uint8_t idx_a = p2;
+                    uint8_t idx_b = p0;
+                    OpCode fused = OpCode::OP_ADD_LOCAL;
+                    if (specialized_op == OpCode::OP_ADD_FLOAT) fused = OpCode::OP_ADD_FLOAT_LOCAL;
+                    else if (specialized_op == OpCode::OP_ADD_STRING) fused = OpCode::OP_ADD_STRING_LOCAL;
 
-                auto& code_mut = const_cast<std::vector<uint8_t>&>(chunk_->code());
-                code_mut.resize(code_mut.size() - 4);
-                chunk_->write_byte(static_cast<uint8_t>(fused), current_token().line);
-                chunk_->write_byte(idx_a, current_token().line);
-                chunk_->write_byte(idx_b, current_token().line);
-                stats_.specialized_ops_emitted++;
-                return;
+                    auto& code_mut = const_cast<std::vector<uint8_t>&>(chunk_->code());
+                    code_mut.resize(code_mut.size() - 4);
+                    chunk_->write_byte(static_cast<uint8_t>(fused), current_token().line);
+                    chunk_->write_byte(idx_a, current_token().line);
+                    chunk_->write_byte(idx_b, current_token().line);
+                    stats_.specialized_ops_emitted++;
+                    return;
+                }
             }
 
             if (static_cast<OpCode>(p3) == OpCode::OP_GET_LOCAL && static_cast<OpCode>(p1) == OpCode::OP_CONSTANT) {
-                uint8_t idx_a = p2;
-                uint8_t const_idx = p0;
-                OpCode fused = OpCode::OP_ADD_LOCAL_CONST;
-                if (specialized_op == OpCode::OP_ADD_FLOAT) fused = OpCode::OP_ADD_LOCAL_CONST_FLOAT;
+                // Only fuse for ADD operations
+                if (specialized_op == OpCode::OP_ADD || specialized_op == OpCode::OP_ADD_INT || 
+                    specialized_op == OpCode::OP_ADD_FLOAT || specialized_op == OpCode::OP_ADD_STRING) {
+                    uint8_t idx_a = p2;
+                    uint8_t const_idx = p0;
+                    OpCode fused = OpCode::OP_ADD_LOCAL_CONST;
+                    if (specialized_op == OpCode::OP_ADD_FLOAT) fused = OpCode::OP_ADD_LOCAL_CONST_FLOAT;
 
-                auto& code_mut = const_cast<std::vector<uint8_t>&>(chunk_->code());
-                code_mut.resize(code_mut.size() - 4);
-                chunk_->write_byte(static_cast<uint8_t>(fused), current_token().line);
-                chunk_->write_byte(idx_a, current_token().line);
-                chunk_->write_byte(const_idx, current_token().line);
-                stats_.specialized_ops_emitted++;
-                return;
+                    auto& code_mut = const_cast<std::vector<uint8_t>&>(chunk_->code());
+                    code_mut.resize(code_mut.size() - 4);
+                    chunk_->write_byte(static_cast<uint8_t>(fused), current_token().line);
+                    chunk_->write_byte(idx_a, current_token().line);
+                    chunk_->write_byte(const_idx, current_token().line);
+                    stats_.specialized_ops_emitted++;
+                    return;
+                }
             }
 
             if (static_cast<OpCode>(p3) == OpCode::OP_CONSTANT && static_cast<OpCode>(p1) == OpCode::OP_GET_LOCAL) {
-                uint8_t const_idx = p2;
-                uint8_t idx_a = p0;
-                OpCode fused = OpCode::OP_ADD_CONST_LOCAL;
-                if (specialized_op == OpCode::OP_ADD_FLOAT) fused = OpCode::OP_ADD_CONST_LOCAL_FLOAT;
+                // Only fuse for ADD operations
+                if (specialized_op == OpCode::OP_ADD || specialized_op == OpCode::OP_ADD_INT || 
+                    specialized_op == OpCode::OP_ADD_FLOAT || specialized_op == OpCode::OP_ADD_STRING) {
+                    uint8_t const_idx = p2;
+                    uint8_t idx_a = p0;
+                    OpCode fused = OpCode::OP_ADD_CONST_LOCAL;
+                    if (specialized_op == OpCode::OP_ADD_FLOAT) fused = OpCode::OP_ADD_CONST_LOCAL_FLOAT;
 
-                auto& code_mut = const_cast<std::vector<uint8_t>&>(chunk_->code());
-                code_mut.resize(code_mut.size() - 4);
-                chunk_->write_byte(static_cast<uint8_t>(fused), current_token().line);
-                chunk_->write_byte(const_idx, current_token().line);
-                chunk_->write_byte(idx_a, current_token().line);
-                stats_.specialized_ops_emitted++;
-                return;
+                    auto& code_mut = const_cast<std::vector<uint8_t>&>(chunk_->code());
+                    code_mut.resize(code_mut.size() - 4);
+                    chunk_->write_byte(static_cast<uint8_t>(fused), current_token().line);
+                    chunk_->write_byte(const_idx, current_token().line);
+                    chunk_->write_byte(idx_a, current_token().line);
+                    stats_.specialized_ops_emitted++;
+                    return;
+                }
             }
         }
     }
