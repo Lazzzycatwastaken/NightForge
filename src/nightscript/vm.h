@@ -130,6 +130,7 @@ private:
     VMResult run(const Chunk& chunk, const Chunk* parent_chunk);
     uint8_t read_byte(const uint8_t*& ip);
     Value read_constant(const Chunk& chunk, const uint8_t*& ip);
+    Value read_constant_long(const Chunk& chunk, const uint8_t*& ip);
     
     // Binary operations
     bool binary_op(OpCode op);

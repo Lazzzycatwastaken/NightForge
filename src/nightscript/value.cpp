@@ -15,8 +15,12 @@ void Chunk::write_constant(const Value& value, int line) {
     if (index < 256) {
         write_byte(static_cast<uint8_t>(OpCode::OP_CONSTANT), line);
         write_byte(static_cast<uint8_t>(index), line);
+    } else if (index < 65536) {
+        write_byte(static_cast<uint8_t>(OpCode::OP_CONSTANT_LONG), line);
+        write_byte(static_cast<uint8_t>(index & 0xFF), line);        // low byte
+        write_byte(static_cast<uint8_t>((index >> 8) & 0xFF), line); // high byte
     } else {
-        std::cerr << "Too many constants in chunk!" << std::endl;
+        std::cerr << "Too many constants in chunk (limit: 65536)!" << std::endl;
     }
 }
 

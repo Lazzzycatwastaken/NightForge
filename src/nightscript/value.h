@@ -19,7 +19,8 @@ namespace nightscript {
 // Bytecode instructions (keep it simple)
 enum class OpCode : uint8_t {
     // Constants
-    OP_CONSTANT,     // load constant
+    OP_CONSTANT,     // load constant (1 byte index, 0-255)
+    OP_CONSTANT_LONG, // load constant (2 byte index, 0-65535)
     OP_NIL,          // push nil
     OP_TRUE,         // push true  
     OP_FALSE,        // push false

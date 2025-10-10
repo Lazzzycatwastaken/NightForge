@@ -135,6 +135,7 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
 
     static void* dispatch_table[] = {
         &&op_CONSTANT,        // OP_CONSTANT
+        &&op_CONSTANT_LONG,   // OP_CONSTANT_LONG
         &&op_NIL,             // OP_NIL
         &&op_TRUE,            // OP_TRUE
         &&op_FALSE,           // OP_FALSE
@@ -219,6 +220,13 @@ VMResult VM::run(const Chunk& chunk, const Chunk* parent_chunk) {
 op_CONSTANT: {
     COUNT_OPCODE(OP_CONSTANT);
     Value constant = read_constant(chunk, ip);
+    push(constant);
+    SAFE_DISPATCH();
+}
+
+op_CONSTANT_LONG: {
+    COUNT_OPCODE(OP_CONSTANT_LONG);
+    Value constant = read_constant_long(chunk, ip);
     push(constant);
     SAFE_DISPATCH();
 }
@@ -1189,6 +1197,13 @@ uint8_t VM::read_byte(const uint8_t*& ip) {
 
 Value VM::read_constant(const Chunk& chunk, const uint8_t*& ip) {
     uint8_t index = read_byte(ip);
+    return chunk.get_constant(index);
+}
+
+Value VM::read_constant_long(const Chunk& chunk, const uint8_t*& ip) {
+    uint8_t low = read_byte(ip);
+    uint8_t high = read_byte(ip);
+    uint16_t index = low | (high << 8);
     return chunk.get_constant(index);
 }
 

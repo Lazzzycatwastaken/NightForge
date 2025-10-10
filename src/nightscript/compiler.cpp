@@ -208,18 +208,82 @@ void Compiler::expression_precedence(int min_precedence) {
             emit_byte(static_cast<uint8_t>(0));
             last_expression_type_ = InferredType::UNKNOWN;
         } else {
-            // size_t saved_current = current_; unused for now
-            expression();
+            size_t saved_pos = current_;
             
-            if (match(TokenType::COLON)) {
-                expression();
-
+            bool is_dictionary = false;
+            if (check(TokenType::IDENTIFIER) || check(TokenType::STRING)) {
+                Token first = current_token();
+                advance();
+                if (check(TokenType::COLON)) {
+                    is_dictionary = true;
+                }
+                current_ = saved_pos;
+            }
+            
+            if (is_dictionary) {
                 emit_byte(static_cast<uint8_t>(OpCode::OP_TABLE_CREATE));
                 
-                advance();
-                error("Dictionary literals not yet fully implemented - use table syntax");
-                return;
+                if (check(TokenType::STRING)) {
+                    Token key = current_token();
+                    advance();
+                    consume(TokenType::COLON, "Expected ':' after key");
+                    uint32_t key_id = strings_->intern(key.lexeme);
+                    size_t key_constant = chunk_->add_constant(Value::string_id(key_id));
+                    emit_bytes(static_cast<uint8_t>(OpCode::OP_CONSTANT), static_cast<uint8_t>(key_constant));
+                    
+                    expression();
+                    
+                    emit_byte(static_cast<uint8_t>(OpCode::OP_TABLE_SET));
+                } else if (check(TokenType::IDENTIFIER)) {
+                    Token key = current_token();
+                    advance();
+                    consume(TokenType::COLON, "Expected ':' after key");
+                    
+                    uint32_t key_id = strings_->intern(key.lexeme);
+                    size_t key_constant = chunk_->add_constant(Value::string_id(key_id));
+                    emit_bytes(static_cast<uint8_t>(OpCode::OP_CONSTANT), static_cast<uint8_t>(key_constant));
+                    
+                    expression();
+                    
+                    emit_byte(static_cast<uint8_t>(OpCode::OP_TABLE_SET));
+                }
+                
+                while (match(TokenType::COMMA)) {
+                    if (check(TokenType::RIGHT_BRACE)) break;
+                    
+                    if (check(TokenType::STRING)) {
+                        Token key = current_token();
+                        advance();
+                        consume(TokenType::COLON, "Expected ':' after key");
+                        
+                        uint32_t key_id = strings_->intern(key.lexeme);
+                        size_t key_constant = chunk_->add_constant(Value::string_id(key_id));
+                        emit_bytes(static_cast<uint8_t>(OpCode::OP_CONSTANT), static_cast<uint8_t>(key_constant));
+                        
+                        expression();
+                        
+                        emit_byte(static_cast<uint8_t>(OpCode::OP_TABLE_SET));
+                    } else if (check(TokenType::IDENTIFIER)) {
+                        Token key = current_token();
+                        advance();
+                        consume(TokenType::COLON, "Expected ':' after key");
+                        
+                        uint32_t key_id = strings_->intern(key.lexeme);
+                        size_t key_constant = chunk_->add_constant(Value::string_id(key_id));
+                        emit_bytes(static_cast<uint8_t>(OpCode::OP_CONSTANT), static_cast<uint8_t>(key_constant));
+                        
+                        expression();
+                        
+                        emit_byte(static_cast<uint8_t>(OpCode::OP_TABLE_SET));
+                    } else {
+                        error("Expected key (identifier or string) in dictionary literal");
+                        return;
+                    }
+                }
+                
+                consume(TokenType::RIGHT_BRACE, "Expected '}' to close dictionary literal");
             } else {
+                expression();
                 int count = 1;
                 while (match(TokenType::COMMA)) {
                     if (check(TokenType::RIGHT_BRACE)) break;
@@ -361,6 +425,21 @@ void Compiler::identifier() {
         emit_bytes(static_cast<uint8_t>(OpCode::OP_GET_GLOBAL), static_cast<uint8_t>(name_constant));
     }
 
+    while (match(TokenType::DOT)) {
+        if (!check(TokenType::IDENTIFIER)) {
+            error("Expected field name after '.'");
+            return;
+        }
+        Token field = current_token();
+        advance();
+        
+        uint32_t field_id = strings_->intern(field.lexeme);
+        size_t field_constant = chunk_->add_constant(Value::string_id(field_id));
+        emit_bytes(static_cast<uint8_t>(OpCode::OP_CONSTANT), static_cast<uint8_t>(field_constant));
+        
+        emit_byte(static_cast<uint8_t>(OpCode::OP_TABLE_GET));
+    }
+
     last_expression_type_ = infer_variable_type(name.lexeme);
 }
 
@@ -420,6 +499,18 @@ void Compiler::statement() {
             advance(); // consume identifier
             current_ = saved_current;
             assignment_statement();
+        } else if (next.type == TokenType::DOT) {
+            Token after_dot = (current_ + 2 < tokens_.size()) ? tokens_[current_ + 2] : Token(TokenType::EOF_TOKEN, "", 0, 0);
+            Token after_field = (current_ + 3 < tokens_.size()) ? tokens_[current_ + 3] : Token(TokenType::EOF_TOKEN, "", 0, 0);
+            
+            if (after_dot.type == TokenType::IDENTIFIER && after_field.type == TokenType::ASSIGN) {
+                advance();
+                current_ = saved_current;
+                assignment_statement();
+            } else {
+                current_ = saved_current;
+                expression_statement();
+            }
         } else if (next.type == TokenType::LEFT_BRACKET) {
             advance();
             Token nameTok = previous_token();
@@ -528,6 +619,9 @@ bool Compiler::try_sugar_statement() {
     if (!check(TokenType::IDENTIFIER)) return false;
     std::string kw = current_token().lexeme;
     if (kw == "add") {
+        if (current_ + 1 < tokens_.size() && tokens_[current_ + 1].type == TokenType::LEFT_PAREN) {
+            return false;
+        }
         advance();
 
         expression();
@@ -634,6 +728,47 @@ void Compiler::assignment_statement() {
     Token name = current_token();
     advance(); // consume identifier
     uint32_t name_id = strings_->intern(name.lexeme);
+    
+    if (check(TokenType::DOT)) {
+        advance();
+        
+        if (!check(TokenType::IDENTIFIER)) {
+            error("Expected field name after '.'");
+            return;
+        }
+        Token field = current_token();
+        advance();
+        
+        if (!match(TokenType::ASSIGN)) {
+            error("Expected '=' after field name");
+            return;
+        }
+
+        std::vector<std::string> combined_locals;
+        combined_locals.reserve(current_local_params_.size() + current_local_locals_.size());
+        for (const auto &p : current_local_params_) combined_locals.push_back(p);
+        for (const auto &l : current_local_locals_) combined_locals.push_back(l);
+
+        auto it = std::find(combined_locals.begin(), combined_locals.end(), name.lexeme);
+        if (it != combined_locals.end()) {
+            size_t idx = static_cast<size_t>(std::distance(combined_locals.begin(), it));
+            emit_byte(static_cast<uint8_t>(OpCode::OP_GET_LOCAL));
+            emit_byte(static_cast<uint8_t>(idx));
+        } else {
+            size_t name_constant = chunk_->add_constant(Value::string_id(name_id));
+            emit_bytes(static_cast<uint8_t>(OpCode::OP_GET_GLOBAL), static_cast<uint8_t>(name_constant));
+        }
+        
+        uint32_t field_id = strings_->intern(field.lexeme);
+        size_t field_constant = chunk_->add_constant(Value::string_id(field_id));
+        emit_bytes(static_cast<uint8_t>(OpCode::OP_CONSTANT), static_cast<uint8_t>(field_constant));
+        
+        expression();
+        
+        emit_byte(static_cast<uint8_t>(OpCode::OP_TABLE_SET));
+        emit_byte(static_cast<uint8_t>(OpCode::OP_POP));
+        return;
+    }
     
     if (!match(TokenType::ASSIGN)) {
         error("Expected '=' after variable name");
