@@ -208,7 +208,7 @@ void Compiler::expression_precedence(int min_precedence) {
             emit_byte(static_cast<uint8_t>(0));
             last_expression_type_ = InferredType::UNKNOWN;
         } else {
-            size_t saved_current = current_;
+            // size_t saved_current = current_; unused for now
             expression();
             
             if (match(TokenType::COLON)) {

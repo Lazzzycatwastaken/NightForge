@@ -1086,12 +1086,17 @@ op_TABLE_KEYS: {
     COUNT_OPCODE(OP_TABLE_KEYS);
     Value tablev = pop();
     if (tablev.type() != ValueType::TABLE_ID) { runtime_error("TABLE_KEYS: not a table"); return VMResult::RUNTIME_ERROR; }
-    std::vector<std::string> keys = tables_.get_keys(tablev.as_table_id());
-    uint32_t arr_id = arrays_.create(keys.size());
-    for (const auto& key : keys) {
-        uint32_t str_id = strings_.intern(key);
+    
+    auto* keys_ptr_heap = new std::vector<std::string>(tables_.get_keys(tablev.as_table_id()));
+    size_t keys_count = keys_ptr_heap->size();
+    
+    uint32_t arr_id = arrays_.create(keys_count);
+    for (size_t i = 0; i < keys_count; ++i) {
+        uint32_t str_id = strings_.intern((*keys_ptr_heap)[i]);
         arrays_.push_back(arr_id, Value::string_id(str_id));
     }
+    delete keys_ptr_heap;
+    
     push(Value::array_id(arr_id));
     SAFE_DISPATCH();
 }
@@ -1100,11 +1105,16 @@ op_TABLE_VALUES: {
     COUNT_OPCODE(OP_TABLE_VALUES);
     Value tablev = pop();
     if (tablev.type() != ValueType::TABLE_ID) { runtime_error("TABLE_VALUES: not a table"); return VMResult::RUNTIME_ERROR; }
-    std::vector<Value> values = tables_.get_values(tablev.as_table_id());
-    uint32_t arr_id = arrays_.create(values.size());
-    for (const auto& value : values) {
-        arrays_.push_back(arr_id, value);
+    
+    auto* values_ptr_heap = new std::vector<Value>(tables_.get_values(tablev.as_table_id()));
+    size_t values_count = values_ptr_heap->size();
+    
+    uint32_t arr_id = arrays_.create(values_count);
+    for (size_t i = 0; i < values_count; ++i) {
+        arrays_.push_back(arr_id, (*values_ptr_heap)[i]);
     }
+    delete values_ptr_heap;
+    
     push(Value::array_id(arr_id));
     SAFE_DISPATCH();
 }
